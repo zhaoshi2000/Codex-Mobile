@@ -6,21 +6,87 @@ struct AISettingsView: View {
     @State private var apiKey = KeychainStore.get(account: ServerAIConfiguration.keyAccount) ?? ""
     @State private var notice: String?
     @State private var checking = false
+    @State private var models: [String] = []
+    @State private var loadingModels = false
+    @State private var modelNotice: String?
+    @State private var modelRequest = UUID()
+    @State private var choosingModel = false
     var body: some View {
         Form {
             Section {
                 TextField("https://你的地址/v1", text: $address).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                 SecureField("API Key", text: $apiKey).textInputAutocapitalization(.never).autocorrectionDisabled()
-                TextField("模型名称", text: $model).textInputAutocapitalization(.never).autocorrectionDisabled()
             } header: { Text("AI 中转站") } footer: { Text("用于服务器 AI 助手，支持兼容 OpenAI 的 Chat Completions 流式接口及工具调用。聊天和选定命令的结果会发送到此地址。API Key 保存在本机钥匙串，与 SSH 私钥分开。") }
+            Section {
+                Button { choosingModel = true } label: {
+                    HStack {
+                        Text("选择模型")
+                        Spacer()
+                        Text(model.isEmpty ? "尚未选择" : model).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Image(systemName: "chevron.right").font(.caption)
+                    }
+                }.disabled(models.isEmpty || loadingModels)
+                Button { modelRequest = UUID() } label: {
+                    HStack { Text(loadingModels ? "正在获取模型…" : (models.isEmpty ? "获取模型列表" : "刷新模型列表")); Spacer(); if loadingModels { ProgressView() } }
+                }.disabled(!canLoadModels || loadingModels)
+                if let modelNotice { Text(modelNotice).font(.caption).foregroundStyle(.secondary) }
+                TextField("手动填写模型名称", text: $model).textInputAutocapitalization(.never).autocorrectionDisabled()
+            } header: { Text("模型") } footer: { Text("填好地址和 API Key 后自动获取模型。选择后点击保存；列表中的模型是否支持聊天和工具调用，以中转站实际支持为准。") }
             Section {
                 Button("保存") { do { try config.save(key: apiKey); notice = "已保存" } catch { notice = error.localizedDescription } }
                 Button(checking ? "正在测试…" : "测试模型连接") { Task { checking = true; defer { checking = false }; do { _ = try await ServerAIClient.complete(config: config, key: apiKey.trimmingCharacters(in: .whitespacesAndNewlines), messages: [["role": "user", "content": "只回复 OK"]], tools: true, onText: { _ in }); notice = "流式接口可用；请保存配置" } catch { notice = error.localizedDescription } } }.disabled(checking)
                 if let notice { Text(notice).font(.caption).textSelection(.enabled) }
             } footer: { Text("测试会发起一次 AI 请求，可能消耗中转站额度。") }
         }.navigationTitle("AI 中转站")
+        .onChange(of: address) { _, _ in resetModelList() }
+        .onChange(of: apiKey) { _, _ in resetModelList() }
+        .task(id: modelRequest) { await loadModels() }
+        .sheet(isPresented: $choosingModel) {
+            NavigationStack { ServerAIModelPicker(models: models, selection: $model) }
+        }
+    }
+    private var canLoadModels: Bool { (try? ServerAIProtocol.modelsEndpoint(address)) != nil && !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private func resetModelList() { models = []; modelNotice = nil; loadingModels = false; choosingModel = false; modelRequest = UUID() }
+    @MainActor private func loadModels() async {
+        guard canLoadModels else { return }
+        let requestID = modelRequest, requestedAddress = address, requestedKey = apiKey
+        do {
+            // Debounce edits; never apply a response for an older address or key.
+            try await Task.sleep(nanoseconds: 700_000_000)
+            try Task.checkCancellation()
+            loadingModels = true; modelNotice = nil
+            let available = try await ServerAIClient.models(address: requestedAddress, key: requestedKey)
+            try Task.checkCancellation()
+            guard requestID == modelRequest else { return }
+            models = available
+            modelNotice = "已获取 \(available.count) 个模型" + (model.isEmpty ? "，请选择模型" : (available.contains(model) ? "" : "；当前填写的模型不在此列表中"))
+        } catch {
+            guard !Task.isCancelled, requestID == modelRequest else { return }
+            modelNotice = error.localizedDescription
+        }
+        if requestID == modelRequest { loadingModels = false }
     }
     private var config: ServerAIConfiguration { ServerAIConfiguration(address: address.trimmingCharacters(in: .whitespacesAndNewlines), model: model.trimmingCharacters(in: .whitespacesAndNewlines)) }
+}
+private struct ServerAIModelPicker: View {
+    let models: [String]
+    @Binding var selection: String
+    @State private var search = ""
+    @Environment(\.dismiss) private var dismiss
+    private var filtered: [String] { search.isEmpty ? models : models.filter { $0.localizedCaseInsensitiveContains(search) } }
+    var body: some View {
+        List {
+            ForEach(filtered, id: \.self) { model in
+                Button { selection = model; dismiss() } label: {
+                    HStack { Text(model).foregroundStyle(.primary); Spacer(); if selection == model { Image(systemName: "checkmark") } }
+                }
+            }
+            if filtered.isEmpty { Text("没有匹配的模型").foregroundStyle(.secondary) }
+        }
+        .searchable(text: $search, prompt: "搜索模型")
+        .navigationTitle("选择模型").navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+    }
 }
 struct ServerAIView: View {
     let connection: ServerConnection

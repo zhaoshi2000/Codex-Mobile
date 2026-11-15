@@ -25,6 +25,24 @@ final class FileServicesTests: XCTestCase {
         var broken = ServerAIStream(); XCTAssertThrowsError(try broken.consume(line([:], finish: "length")))
         XCTAssertThrowsError(try broken.consume("data: {\"error\":{\"message\":\"secret\"}}"))
     }
+    func testModelDiscoveryUsesSameAPIPrefixAsChat() throws {
+        for (address, expected) in [
+            ("https://example.com", "/v1/models"),
+            (" https://example.com/v1/ ", "/v1/models"),
+            ("https://example.com/custom/v1", "/custom/v1/models"),
+            ("https://example.com/custom/v1/chat/completions/", "/custom/v1/models")
+        ] { XCTAssertEqual(try ServerAIProtocol.modelsEndpoint(address).path, expected) }
+        for address in ["http://example.com", "https://user:secret@example.com", "https://example.com/v1?key=secret", "https://example.com/#token"] {
+            XCTAssertThrowsError(try ServerAIProtocol.modelsEndpoint(address))
+        }
+    }
+    func testModelDiscoveryParsesDeduplicatesAndRejectsInvalidResponses() throws {
+        let data = try JSONSerialization.data(withJSONObject: ["data": [["id": "z-model"], ["id": "a-model"], ["id": "z-model"], ["id": " "], ["id": "bad\nmodel"], ["name": "missing-id"]]])
+        XCTAssertEqual(try ServerAIProtocol.modelIDs(data), ["a-model", "z-model"])
+        for invalid in ["{\"data\":[]}", "{\"models\":[\"a\"]}", "{\"error\":{},\"data\":[{\"id\":\"a\"}]}", "<html>login</html>"] {
+            XCTAssertThrowsError(try ServerAIProtocol.modelIDs(Data(invalid.utf8)))
+        }
+    }
     func testServerAIAddressAndSecretRedaction() throws {
         XCTAssertEqual(try ServerAIProtocol.endpoint("https://example.com/").absoluteString, "https://example.com/v1/chat/completions")
         XCTAssertEqual(try ServerAIProtocol.endpoint("https://example.com/custom/v1/").path, "/custom/v1/chat/completions")

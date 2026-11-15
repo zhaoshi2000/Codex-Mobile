@@ -22,6 +22,37 @@ private final class ServerAIRedirectGuard: NSObject, URLSessionTaskDelegate, @un
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
 @MainActor enum ServerAIClient {
+    static func models(address: String, key: String) async throws -> [String] {
+        let clean = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, !clean.contains("\n"), !clean.contains("\r") else { throw ServerAIError(message: "请填写有效 API Key") }
+        var request = URLRequest(url: try ServerAIProtocol.modelsEndpoint(address))
+        request.setValue("Bearer " + clean, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let settings = URLSessionConfiguration.ephemeral
+        settings.timeoutIntervalForRequest = 20; settings.timeoutIntervalForResource = 30
+        let session = URLSession(configuration: settings, delegate: ServerAIRedirectGuard(), delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ServerAIError(message: "未收到有效 HTTP 响应") }
+        guard http.statusCode == 200 else {
+            let hint: String
+            switch http.statusCode {
+            case 401, 403: hint = "请检查 API Key 和模型列表权限"
+            case 404, 405: hint = "该地址不支持获取模型，请检查地址或手动填写模型名称"
+            case 429: hint = "请求过于频繁，请稍后刷新"
+            case 300...399: hint = "地址发生重定向，请填写最终 API 地址"
+            default: hint = "请检查中转服务状态"
+            }
+            throw ServerAIError(message: "获取模型失败（HTTP \(http.statusCode)）：" + hint)
+        }
+        var data = Data()
+        for try await byte in bytes {
+            try Task.checkCancellation()
+            guard data.count < 2_000_000 else { throw ServerAIError(message: "模型列表过大，请手动填写模型名称") }
+            data.append(byte)
+        }
+        return try ServerAIProtocol.modelIDs(data)
+    }
     static func complete(config: ServerAIConfiguration, key: String, messages: [[String: Any]], tools: Bool = true, onText: @escaping (String) -> Void) async throws -> (String, [ServerAITool]) {
         try config.validate()
         guard !key.isEmpty else { throw ServerAIError(message: "请先在设置中保存 AI API Key") }

@@ -52,6 +52,22 @@ struct ServerAIStream {
     }
 }
 enum ServerAIProtocol {
+    static func modelsEndpoint(_ input: String) throws -> URL {
+        let chat = try endpoint(input)
+        return chat.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("models")
+    }
+    static func modelIDs(_ data: Data) throws -> [String] {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rows = object["data"] as? [[String: Any]], object["error"] == nil else {
+            throw ServerAIError(message: "中转站未返回有效模型列表，可手动填写模型名称")
+        }
+        let ids = rows.compactMap { $0["id"] as? String }.filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.count < 200 && !$0.contains(where: { $0.isNewline })
+        }
+        let models = Set(ids).sorted()
+        guard !models.isEmpty else { throw ServerAIError(message: "此 API Key 暂无可用模型，可检查权限或手动填写模型名称") }
+        return models
+    }
     static func endpoint(_ input: String) throws -> URL {
         guard var c = URLComponents(string: input.trimmingCharacters(in: .whitespacesAndNewlines)), c.scheme == "https", c.host != nil, c.user == nil, c.password == nil, c.query == nil, c.fragment == nil else { throw ServerAIError(message: "请填写 HTTPS 中转地址，不要把密钥放在网址里") }
         var path = c.path; while path.hasSuffix("/") { path.removeLast() }

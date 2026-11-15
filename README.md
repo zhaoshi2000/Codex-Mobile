@@ -1,6 +1,6 @@
-# AstroGate 管家 0.4.18
+# AstroGate 管家 0.4.19
 
-0.4.18：点击 SSH 服务器整行直接进入终端；图片滑动与点按互斥，滑动仅切换缩略图；引导消息立即显示文字、图片和送达状态，并与电脑消息去重合并。
+0.4.19：AI 中转站填入接口地址和 API Key 后自动获取模型列表，支持搜索、选择、刷新，并保留手动填写模型。选择后保存即可用于服务器 AI 助手。
 
 0.4.17：下载成功卡片仅保留“分享 / 导出”，移除签名与打开文件按钮；左侧抽屉收窄至屏幕的 74%（最多 300 点），移除置顶对话区域及置顶入口。
 
@@ -75,7 +75,7 @@ SwiftUI 文件管理器，支持本地文件浏览与操作、文本编辑、双
 
 Windows 便携包请到 [Releases](https://github.com/zhaoshi2000/Codex-Mobile/releases) 下载，解压后双击 `Open AstroGate Connect.cmd`。电脑需打开并登录 Codex，首次使用填写中转 WSS 地址和连接密钥。
 
-iOS 源码版本为 0.4.18（25），最低支持 iOS 17。请在 Xcode 工程中配置自己的 Bundle ID、Team 和 Provisioning Profile，随附脚本与 ExportOptions.plist 中的 YOUR_* 占位符也需替换为同一套签名配置。GitHub Actions 手动构建需要 IOS_P12_BASE64、IOS_P12_PASSWORD、IOS_PROFILE_BASE64 三个仓库密钥。
+iOS 源码版本为 0.4.19（26），最低支持 iOS 17。请在 Xcode 工程中配置自己的 Bundle ID、Team 和 Provisioning Profile，随附脚本与 ExportOptions.plist 中的 YOUR_* 占位符也需替换为同一套签名配置。GitHub Actions 手动构建需要 IOS_P12_BASE64、IOS_P12_PASSWORD、IOS_PROFILE_BASE64 三个仓库密钥。
 
 公开仓库提供源码与 Windows 包。iOS 安装需自行使用有效证书签名，Ad Hoc 分发要求设备已登记到描述文件。
 
