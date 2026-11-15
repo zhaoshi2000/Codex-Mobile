@@ -24,7 +24,11 @@ export function assistantLinks(items) {
 }
 export async function matchesLinkedFile(target, items) {
   const equal = (a, b) => process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
-  for (const link of assistantLinks(items)) {
+  const attachments = items.filter(i => (i.type || "").toLowerCase() === "usermessage")
+    .flatMap(i => Array.isArray(i.content) ? i.content : [])
+    .filter(c => ["localImage", "mention", "localAudio"].includes(c.type))
+    .map(c => localLinkPath(c.path)).filter(Boolean);
+  for (const link of [...assistantLinks(items), ...attachments]) {
     // Require both the spelled path and canonical target. This does not authorize aliases or siblings.
     if (!equal(path.resolve(link), path.resolve(target))) continue;
     try { return await fs.realpath(link); } catch { throw Error("对话中的文件已移动或删除，请让电脑重新提供文件"); }

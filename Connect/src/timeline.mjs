@@ -107,6 +107,8 @@ export function messages(turns, budget = 230000, includeCommands = false) {
         clientMessageId: i.clientId || i.clientMessageId || null,
         startedAtMs: i.startedAtMs || turn.turnStartedAtMs || null,
         phase: i.phase || null,
+        // Only a final answer has an output completion time; progress paragraphs do not.
+        completedAtMs: type === "agentmessage" && i.phase === "final_answer" ? i.completedAtMs || null : null,
       });
     }
   }

@@ -48,6 +48,7 @@
 		AF0470000000000000000001 /* CodexChatNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0470000000000000000002; };
 		AF0480000000000000000001 /* CodexChatTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0480000000000000000002; };
 		AF0500000000000000000001 /* CodexDownloadState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0500000000000000000002; };
+		AF0160000000000000000001 /* CodexThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0160000000000000000002; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -90,6 +91,7 @@
 		AF0470000000000000000002 /* CodexChatNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexChatNavigation.swift; sourceTree = "<group>"; };
 		AF0480000000000000000002 /* CodexChatTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexChatTimeline.swift; sourceTree = "<group>"; };
 		AF0500000000000000000002 /* CodexDownloadState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexDownloadState.swift; sourceTree = "<group>"; };
+		AF0160000000000000000002 /* CodexThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexThumbnailCache.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -130,6 +132,7 @@
 			9473BA4F1A39338AE9B96A7C,
 			534BC89917766F923BE19A09 /* CodexConnectService.swift */,
 			AF0480000000000000000002,
+				AF0160000000000000000002 /* CodexThumbnailCache.swift */,
 			AF0500000000000000000002,
 			9F56D9B4FE2C4A01877284B4 /* ConnectionStore.swift */,
 			505DF9FC580D46A8ABC0BC58 /* FTPClient.swift */,
@@ -206,6 +209,7 @@
 		17B1B07EF8CD4221A4ABD237 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
 			AF0470000000000000000001,
 			AF0480000000000000000001,
+				AF0160000000000000000001 /* CodexThumbnailCache.swift in Sources */,
 			AF0500000000000000000001,
 			E12FCE149EB2443D9D7DC483,
 			3105270376F94672A08A7A95,
@@ -295,11 +299,11 @@
 				"CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]" = NO;
 				DEVELOPMENT_TEAM = YOUR_TEAM_ID;
 				PROVISIONING_PROFILE_SPECIFIER = "YOUR_PROFILE_NAME";
-				CURRENT_PROJECT_VERSION = 22;
+				CURRENT_PROJECT_VERSION = 23;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iFilePlus/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.4.15;
+				MARKETING_VERSION = 0.4.16;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.AstroGate;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -320,11 +324,11 @@
 				"CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]" = NO;
 				DEVELOPMENT_TEAM = YOUR_TEAM_ID;
 				PROVISIONING_PROFILE_SPECIFIER = "YOUR_PROFILE_NAME";
-				CURRENT_PROJECT_VERSION = 22;
+				CURRENT_PROJECT_VERSION = 23;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iFilePlus/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.4.15;
+				MARKETING_VERSION = 0.4.16;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.AstroGate;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

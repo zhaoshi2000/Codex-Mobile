@@ -187,4 +187,50 @@ final class FileServicesTests: XCTestCase {
         state.phase = .cancelling; XCTAssertTrue(state.active)
         state.phase = .cancelled; XCTAssertEqual(state.title, "下载已取消"); XCTAssertFalse(state.active)
     }
+    func testCompletionTimeSurvivesHistoryRefreshWithoutInventingOne() {
+        let completed = CodexChatMessage(["id": "answer", "text": "done", "completedAtMs": 1700000000123.0])!
+        let missing = CodexChatMessage(["id": "answer", "text": "done"])!
+        XCTAssertNil(missing.completedAt)
+        XCTAssertEqual(CodexChatTimeline.merge([completed], [missing], history: true).last?.completedAt, 1700000000123.0)
+        XCTAssertEqual(CodexChatTimeline.merge([missing], [completed], history: true).last?.completedAt, 1700000000123.0)
+    }
+    func testImageOnlyMessageHasNoTextBubbleAndMixedMessagePreservesText() {
+        let image = "📎 [图片](<C:/photo.jpg>)"
+        XCTAssertEqual(CodexMessageImages(image).body, "")
+        XCTAssertEqual(CodexMessageImages("解释图片\n" + image).body, "解释图片")
+        XCTAssertEqual(CodexMessageImages(image + "\n" + image).paths, ["C:/photo.jpg"])
+    }
+
+    func testThumbnailRequestsCoalesceAndSurviveScrollCancellationAndReentry() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let cache = CodexThumbnailCache(directory: dir)
+        let counter = ThumbnailLoadCounter()
+        let first = Task { try await cache.data(for: "host/thread/photo") { await counter.load() } }
+        try await Task.sleep(nanoseconds: 10000000)
+        first.cancel()
+        let second = try await cache.data(for: "host/thread/photo") { await counter.load() }
+        _ = try await first.value
+        XCTAssertEqual(second, Data("thumbnail".utf8))
+        let total = await counter.count
+        XCTAssertEqual(total, 1)
+        let reopened = CodexThumbnailCache(directory: dir)
+        let cached = try await reopened.data(for: "host/thread/photo") { await counter.load() }
+        XCTAssertEqual(cached, second)
+        let afterReentry = await counter.count
+        XCTAssertEqual(afterReentry, 1)
+        _ = try await reopened.data(for: "different-host/thread/photo") { await counter.load() }
+        let afterOtherDevice = await counter.count
+        XCTAssertEqual(afterOtherDevice, 2)
+    }
+
+}
+
+private actor ThumbnailLoadCounter {
+    var count = 0
+    func load() async -> Data {
+        count += 1
+        try? await Task.sleep(nanoseconds: 80000000)
+        return Data("thumbnail".utf8)
+    }
 }

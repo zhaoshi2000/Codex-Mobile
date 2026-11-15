@@ -83,6 +83,12 @@ extension Data {
     private let imageCache = NSCache<NSString, UIImage>()
     private var uploadedPaths: [String: String] = [:]
     @Published var messages: [CodexChatMessage] = []
+    @Published var threadTitles: [String: String] = [:]
+    func title(for thread: CodexRow) -> String { threadTitles[thread.id] ?? thread.title }
+    func renameThread(_ id: String, title: String) async throws {
+        let result = try await request("renameThread", ["threadId": id, "title": title])
+        threadTitles[id] = result["title"] as? String ?? title
+    }
     @Published var olderCursor: String?
     @Published var running = false
     @Published var questions: [CodexQuestionGroup] = []
@@ -289,6 +295,8 @@ extension Data {
             let progress = value["progress"] as? [String: Any] ?? [:]
             progressLabel = progress["label"] as? String ?? ""
             progressSteps = (progress["steps"] as? [[String: Any]] ?? []).compactMap(CodexProgressStep.init)
+        case "threadRenamed":
+            if let id = value["threadId"] as? String, let title = value["title"] as? String { threadTitles[id] = title }
         case "queued":
             guard value["threadId"] as? String == selectedThread else { return }
             queuedMessages = (value["messages"] as? [[String: Any]] ?? []).compactMap(CodexQueuedMessage.init)
@@ -307,7 +315,7 @@ extension Data {
     func request(_ method: String, _ params: [String: Any] = [:]) async throws -> [String: Any] {
         guard connected else { throw CodexConnectError(message: "电脑未连接，请返回项目页重连") }
         let id = UUID().uuidString
-        return try await withCheckedThrowingContinuation { continuation in
+        let result: [String: Any] = try await withCheckedThrowingContinuation { continuation in
             pending[id] = continuation
             deadlines[id] = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(45))
@@ -317,6 +325,12 @@ extension Data {
             }
             enqueue(["id": id, "method": method, "params": params], encrypted: true)
         }
+        // Fresh native list titles supersede phone-side immediate rename feedback.
+        let rows = (result["threads"] as? [[String: Any]] ?? []) + (result["pinned"] as? [[String: Any]] ?? [])
+        for row in rows {
+            if let threadID = row["id"] as? String, let title = row["title"] as? String { threadTitles[threadID] = title }
+        }
+        return result
     }
     private func merge(_ rows: [[String: Any]], history: Bool = false) {
         for row in rows {
@@ -398,17 +412,23 @@ extension Data {
         await refreshQueue(threadID)
         guard result["state"] as? String == "accepted" else { throw CodexConnectError(message: result["error"] as? String ?? "送达待确认，请查看电脑原对话") }
     }
-    func imageThumbnail(_ path: String, threadID: String) async throws -> UIImage {
-        let key = (threadID + ":" + path) as NSString
-        if let image = imageCache.object(forKey: key) { return image }
+    private func thumbnailKey(_ path: String, threadID: String) -> String { device.hostKey + "\n" + threadID + "\n" + path }
+    func cachedThumbnail(_ path: String, threadID: String) -> UIImage? { imageCache.object(forKey: thumbnailKey(path, threadID: threadID) as NSString) }
+    private func loadThumbnailData(_ path: String, threadID: String) async throws -> Data {
         let result = try await request("imageThumbnail", ["projectId": "thread:" + threadID, "absolutePath": path])
-        try Task.checkCancellation()
         guard let encoded = result["data"] as? String, let data = Data(base64Encoded: encoded), data.count <= 150000,
-              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceCreateWithData(data as CFData, nil) != nil else { throw CodexConnectError(message: "缩略图读取失败") }
+        return data
+    }
+    func imageThumbnail(_ path: String, threadID: String) async throws -> UIImage {
+        if let image = cachedThumbnail(path, threadID: threadID) { return image }
+        let key = thumbnailKey(path, threadID: threadID)
+        let data = try await CodexThumbnailCache.shared.data(for: key) { try await self.loadThumbnailData(path, threadID: threadID) }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 240, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else { throw CodexConnectError(message: "缩略图读取失败") }
         let image = UIImage(cgImage: cg)
         imageCache.countLimit = 36; imageCache.totalCostLimit = 8 * 1024 * 1024
-        imageCache.setObject(image, forKey: key, cost: cg.bytesPerRow * cg.height)
+        imageCache.setObject(image, forKey: key as NSString, cost: cg.bytesPerRow * cg.height)
         return image
     }
     func updateDelivery(_ id: String, _ state: String) {

@@ -10,10 +10,11 @@ struct CodexChatMessage: Identifiable {
     let provisional: Bool
     let startedAt: Double?
     let toolStatus: String?
+    var completedAt: Double?
     var delivery: String?
     init(id: String, text: String, delivery: String) {
         self.id = id; self.role = "user"; self.text = text; self.truncated = false
-        self.turnID = nil; self.clientMessageID = id; self.provisional = true; self.delivery = delivery; startedAt = nil; toolStatus = nil
+        self.turnID = nil; self.clientMessageID = id; self.provisional = true; self.delivery = delivery; startedAt = nil; toolStatus = nil; completedAt = nil
     }
     init?(_ json: [String: Any]) {
         guard let id = json["id"] as? String, let text = json["text"] as? String else { return nil }
@@ -21,6 +22,7 @@ struct CodexChatMessage: Identifiable {
         role = json["role"] as? String ?? "assistant"
         truncated = json["truncated"] as? Bool ?? false; turnID = json["turnId"] as? String
         clientMessageID = json["clientMessageId"] as? String; provisional = json["provisional"] as? Bool ?? false; delivery = nil
+        completedAt = (json["completedAtMs"] as? NSNumber)?.doubleValue
         startedAt = (json["startedAtMs"] as? NSNumber)?.doubleValue; toolStatus = json["toolStatus"] as? String
     }
 }
@@ -75,7 +77,11 @@ enum CodexChatTimeline {
             if row.provisional, let turn = row.turnID,
                let real = result.first(where: { $0.role == "user" && !$0.provisional && $0.turnID == turn }) { previous = real.id; continue }
             if let index = result.firstIndex(where: { $0.id == row.id }) {
-                if !history || row.text.hasPrefix(result[index].text) { result[index] = row }
+                if !history || row.text.hasPrefix(result[index].text) {
+                    var updated = row
+                    updated.completedAt = row.completedAt ?? result[index].completedAt
+                    result[index] = updated
+                } else if result[index].completedAt == nil { result[index].completedAt = row.completedAt }
             } else if let prior = previous, let index = result.firstIndex(where: { $0.id == prior }) {
                 result.insert(row, at: index + 1)
             } else if let next = incoming.dropFirst(offset + 1).first(where: { candidate in result.contains(where: { $0.id == candidate.id }) }),

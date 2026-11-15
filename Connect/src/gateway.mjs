@@ -118,7 +118,7 @@ export class Gateway {
         r.data
           .slice()
           .reverse()
-          .map((x) => ({ id: x.turnId, items: [{ ...x.item, startedAtMs: x.startedAtMs }] })),
+          .map((x) => ({ id: x.turnId, items: [{ ...x.item, startedAtMs: x.startedAtMs ?? x.item.startedAtMs, completedAtMs: x.completedAtMs ?? x.item.completedAtMs }] })),
         Infinity,
         true,
       );
@@ -145,7 +145,7 @@ export class Gateway {
       if (!p.absolutePath || !this.catalog || !p.projectId.startsWith("thread:")) throw error;
     }
     const threadId = p.projectId.slice(7);
-    const live = desktopTurns(this.states.get(threadId)?.state).flatMap(t => t.items || []);
+    const live = desktopTurns(this.states.get(threadId)?.state).flatMap(t => [...(t.items || []), ...(t.params?.input ? [{ type: "userMessage", content: t.params.input }] : [])]);
     let real = await matchesLinkedFile(requested, live);
     if (real) return real;
     let cursor;
@@ -255,7 +255,7 @@ export class Gateway {
       this.fileQueue = run.catch(() => {});
       return run;
     }
-    if (["send", "steerQueued", "removeQueued", "answer", "createThread", "deleteThread", "forkThread", "setModel", "pinThread", "markRead"].includes(method)) {
+    if (["send", "steerQueued", "removeQueued", "answer", "createThread", "deleteThread", "renameThread", "forkThread", "setModel", "pinThread", "markRead"].includes(method)) {
       const run = (this.sendQueue || Promise.resolve()).then(() =>
         this.dispatch(method, p, peer),
       );
@@ -294,6 +294,15 @@ export class Gateway {
       case "forkThread": return this.forkThread(p, peer);
       case "createThread": return this.createThread(p, peer);
       case "deleteThread": return this.deleteThread(p, peer);
+      case "renameThread": {
+        await this.authorizeThread(p.threadId);
+        const name = typeof p.title === "string" ? p.title.trim() : "";
+        if (!name || name.length > 120 || /[\x00-\x1f\x7f]/.test(name)) throw Error("对话名称须为 1–120 个字符，不能包含换行");
+        await this.rpc.call("thread/name/set", { threadId: p.threadId, name });
+        this.catalog?.pages.clear();
+        for (const sub of this.subscribers.values()) sub.peer.emit?.({ event: "threadRenamed", threadId: p.threadId, title: name });
+        return { title: name };
+      }
       case "uploadBegin": {
         const thread = await this.authorizeThread(p.threadId);
         return this.uploads.begin(p, peer, await fs.realpath(thread.cwd));

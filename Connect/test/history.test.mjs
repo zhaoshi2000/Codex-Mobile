@@ -60,3 +60,12 @@ test('command summaries retain ordering time without sending command output unti
   g.states.set('thread-history-123',{state:{turns:[{turnId:'turn',items:[{type:'reasoning',id:'reason',text:'private'}]}]}});
   await assert.rejects(g.handle('commandDetails',{threadId:'thread-history-123',turnId:'turn',itemId:'reason'},{}));
 });
+
+test('completion time is stable across history and live final answers, never assigned to progress',async t=>{
+  const item={id:'answer',type:'agentMessage',text:'done',phase:'final_answer'};
+  const g=await fixture(t,[{turnId:'turn',item,completedAtMs:1700000000123}]);
+  assert.equal((await g.history('thread-test-123456')).messages[0].completedAtMs,1700000000123);
+  const live=messages([{id:'turn',items:[{...item,completedAtMs:1700000000123},{...item,id:'progress',phase:'commentary',completedAtMs:1700000000000}]}]);
+  assert.equal(live[0].completedAtMs,1700000000123);assert.equal(live[1].completedAtMs,null);
+  assert.equal(messages([{id:'turn',items:[item]}])[0].completedAtMs,null);
+});

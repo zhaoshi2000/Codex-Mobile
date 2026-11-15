@@ -56,3 +56,13 @@ test('queued completion follows its actual turn, not the preceding task, and sur
  await g.completeQueuedTurns(id,[{id:'later-turn',status:'inProgress',params:{clientUserMessageId:messageId}}]);assert.equal(g.ledger[messageId].startedTurnId,'later-turn');
  await g.completeQueuedTurns(id,[{id:'later-turn',status:'completed',items:[]}]);assert.ok(g.ledger[messageId].completedAt);assert.equal(g.pendingQueued.has(id),false);
 });
+
+test('rename uses native thread name, rejects invalid titles, and reports failure without notifying phones', async t => {
+  const {g,rpc,peer,id}=await fixture(t);let name='old',events=[];
+  g.subscribers.set(peer.id,{threadId:id,peer:{...peer,emit:e=>events.push(e)}});
+  rpc.call=async(method,p)=>{if(method==='thread/read')return{thread:{cwd:g.roots[0]}};assert.equal(method,'thread/name/set');if(p.name==='reject')throw Error('desktop rejected');name=p.name;return{}};
+  assert.equal((await g.handle('renameThread',{threadId:id,title:'  新标题  '},peer)).title,'新标题');
+  assert.equal(name,'新标题');assert.equal(events[0].title,'新标题');
+  for(const title of ['', 'x'.repeat(121), 'a\nb'])await assert.rejects(g.handle('renameThread',{threadId:id,title},peer));
+  await assert.rejects(g.handle('renameThread',{threadId:id,title:'reject'},peer));assert.equal(events.length,1);
+});

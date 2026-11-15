@@ -53,7 +53,7 @@ private struct CodexActivitySection: View {
         Section("正在运行 · " + device.displayName) {
             ForEach(service.activeTasks) { thread in
                 NavigationLink { CodexChatView(service: service, thread: thread) } label: {
-                    HStack { ProgressView(); VStack(alignment: .leading, spacing: 4) { Text(thread.title).lineLimit(2); Text(thread.path).font(.caption).foregroundStyle(.secondary) } }
+                    HStack { ProgressView(); VStack(alignment: .leading, spacing: 4) { Text(service.title(for: thread)).lineLimit(2); Text(thread.path).font(.caption).foregroundStyle(.secondary) } }
                 }
             }
             if !service.connected { Text(service.status).font(.caption).foregroundStyle(.secondary) }
@@ -126,9 +126,9 @@ private struct CodexHostView: View {
             Group {
                 Section("最近对话") {
                     ForEach(threads) { thread in
-                        NavigationLink { CodexChatView(service: service, thread: thread) } label: { VStack(alignment: .leading, spacing: 4) { Text(thread.title).lineLimit(2); Text(thread.path).font(.caption).foregroundStyle(.secondary) } }
+                        NavigationLink { CodexChatView(service: service, thread: thread) } label: { VStack(alignment: .leading, spacing: 4) { Text(service.title(for: thread)).lineLimit(2); Text(thread.path).font(.caption).foregroundStyle(.secondary) } }
                             .disabled(!service.connected)
-                            .modifier(CodexDeleteChat(service: service, thread: thread) { await load() })
+                            .modifier(CodexDeleteChat(service: service, thread: thread, onDeleted: { await load() }))
                     }
                     if cursor != nil { Button("查看更多（20 条）") { Task { await load(more: true) } }.disabled(loading) }
                     if threads.isEmpty && service.connected && !loading { Text("本机暂无对话").foregroundStyle(.secondary) }
@@ -178,8 +178,8 @@ private struct CodexThreadsView: View {
             Section { NavigationLink { CodexFilesView(service: service, project: project, path: "", title: "项目文件") } label: { Label("项目文件与下载", systemImage: "arrow.down.doc") } }
             Section("对话") {
                 ForEach(threads) { thread in
-                    NavigationLink { CodexChatView(service: service, thread: thread) } label: { Text(thread.title).lineLimit(2) }
-                        .modifier(CodexDeleteChat(service: service, thread: thread) { await load() })
+                    NavigationLink { CodexChatView(service: service, thread: thread) } label: { Text(service.title(for: thread)).lineLimit(2) }
+                        .modifier(CodexDeleteChat(service: service, thread: thread, onDeleted: { await load() }))
                 }
                 if let _ = cursor { Button("查看更多（20 条）") { Task { await load(more: true) } }.disabled(loading) }
                 if loading { ProgressView() }
@@ -254,13 +254,33 @@ struct CodexDeleteChat: ViewModifier {
     @ObservedObject var service: CodexConnectService
     let thread: CodexRow
     let onDeleted: () async -> Void
+    var pinLabel: String? = nil
+    var pinAction: (() -> Void)? = nil
+    @State private var renaming = false
+    @State private var newTitle = ""
     @State private var confirming = false
     @State private var deleting = false
     @State private var requestID = UUID().uuidString
     func body(content: Content) -> some View {
         content
-            .swipeActions { Button("删除", role: .destructive) { confirming = true }.disabled(deleting || !service.connected) }
-            .contextMenu { Button("删除对话", systemImage: "trash", role: .destructive) { confirming = true }.disabled(deleting || !service.connected) }
+            .swipeActions {
+                Button("删除", role: .destructive) { confirming = true }.disabled(deleting || !service.connected)
+                Button("重命名", systemImage: "pencil") { newTitle = service.title(for: thread); renaming = true }.tint(.blue).disabled(deleting || !service.connected)
+            }
+            .contextMenu {
+                Button("重命名", systemImage: "pencil") { newTitle = service.title(for: thread); renaming = true }.disabled(deleting || !service.connected)
+                if let pinLabel, let pinAction { Button(pinLabel, systemImage: "pin", action: pinAction) }
+                Button("删除对话", systemImage: "trash", role: .destructive) { confirming = true }.disabled(deleting || !service.connected)
+            }
+            .alert("重命名对话", isPresented: $renaming) {
+                TextField("对话名称", text: $newTitle)
+                Button("取消", role: .cancel) { }
+                Button("保存") { Task {
+                    deleting = true; defer { deleting = false }
+                    do { try await service.renameThread(thread.id, title: newTitle.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                    catch { service.error = error.localizedDescription }
+                } }.disabled(newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || newTitle.count > 120)
+            }
             .overlay(alignment: .trailing) { if deleting { ProgressView() } }
             .alert("永久删除对话？", isPresented: $confirming) {
                 Button("取消", role: .cancel) { }
@@ -408,7 +428,7 @@ private struct CodexChatContent: View {
         }
         .accessibilityHidden(navigationOpen)
         .overlay { chatNavigationOverlay }
-        .navigationTitle(thread.title).navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(service.title(for: thread)).navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {

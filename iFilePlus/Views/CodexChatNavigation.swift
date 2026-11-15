@@ -118,7 +118,6 @@ struct CodexChatGroupView: View {
     @State private var copied = false
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if group.isUser { Text("你").font(.caption.bold()).foregroundStyle(.blue) }
             ForEach(group.blocks) { block in
                 if block.isCommands { CodexCommandGroup(service: service, threadID: threadID, items: block.items) }
                 else if let message = block.items.first {
@@ -126,12 +125,19 @@ struct CodexChatGroupView: View {
                     if !images.paths.isEmpty {
                         HStack { Spacer(minLength: 0); CodexImageStack(service: service, threadID: threadID, paths: images.paths, open: openFile) }
                     }
-                    CodexMarkdownView(text: message.role == "user" ? images.body : message.text).textSelection(.enabled)
+                    if message.role != "user" || !images.body.isEmpty {
+                    HStack {
+                        if group.isUser { Spacer(minLength: 24) }
+                        CodexMarkdownView(text: message.role == "user" ? images.body : message.text).textSelection(.enabled)
+                        .padding(group.isUser ? 12 : 0)
+                        .background(group.isUser ? Color.blue.opacity(0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
                         .environment(\.openURL, OpenURLAction { url in
                             if url.scheme == "ifilepc", let data = Data(codexBase64URL: url.lastPathComponent), let path = String(data: data, encoding: .utf8) { openFile(path); return .handled }
                             if ["https", "http", "mailto"].contains(url.scheme ?? "") { return .systemAction }
                             return .discarded
                         })
+                    }
+                    }
                     if let delivery = message.delivery { Text(delivery).font(.caption).foregroundStyle(.secondary) }
                     if message.truncated { Text("长消息已截取，请在电脑查看完整内容。").font(.caption).foregroundStyle(.secondary) }
                 }
@@ -140,10 +146,13 @@ struct CodexChatGroupView: View {
                 HStack(spacing: 18) {
                     Button { UIPasteboard.general.string = group.text; copied = true } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc") }.accessibilityLabel("复制本轮回复")
                     if reply.turnID != nil { Button { fork(reply) } label: { Image(systemName: "arrow.triangle.branch") }.accessibilityLabel("创建分支").disabled(forking || !service.connected) }
+                    if let completedAt = reply.completedAt, completedAt > 0 {
+                        Text(Date(timeIntervalSince1970: completedAt / 1000), format: .dateTime.hour().minute())
+                            .monospacedDigit().accessibilityLabel("输出完成时间")
+                    }
                 }.font(.caption).foregroundStyle(.secondary).padding(.top, 6)
             }
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(group.isUser ? 12 : 0)
-            .background(group.isUser ? Color.blue.opacity(0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -264,15 +273,15 @@ struct CodexChatNavigation: View {
         Button { select(thread) } label: {
             HStack(spacing: 10) {
                 if thread.id == currentID { Image(systemName: "bubble.left.fill").font(.caption) }
-                Text(thread.title).foregroundStyle(.primary).lineLimit(2)
+                Text(service.title(for: thread)).foregroundStyle(.primary).lineLimit(2)
                 Spacer(minLength: 4)
                 if service.activeTasks.contains(where: { $0.id == thread.id }) { Circle().fill(.green).frame(width: 8, height: 8).accessibilityLabel("正在运行") }
                 else if service.unreadThreads.contains(thread.id) { Circle().fill(.blue).frame(width: 8, height: 8).accessibilityLabel("完成未读") }
             }
         }
-        .contextMenu {
-            Button(pinned.contains(where: { $0.id == thread.id }) ? "取消置顶" : "置顶对话", systemImage: "pin") { Task { await pin(thread) } }
-        }
+        .modifier(CodexDeleteChat(service: service, thread: thread, onDeleted: { await load() },
+                                  pinLabel: pinned.contains(where: { $0.id == thread.id }) ? "取消置顶" : "置顶对话",
+                                  pinAction: { Task { await pin(thread) } }))
         .swipeActions(edge: .leading) { Button("置顶", systemImage: "pin") { Task { await pin(thread) } }.tint(.orange) }
     }
     @ViewBuilder private func projectBadge(_ id: String) -> some View {
@@ -405,8 +414,12 @@ struct CodexImageThumbnail: View {
             else if failed { Image(systemName: "photo").foregroundStyle(.secondary) }
             else { ProgressView().controlSize(.small) }
         }.task(id: path + String(service.connected)) {
-            image = nil; failed = false
-            do { image = try await service.imageThumbnail(path, threadID: threadID) }
+            image = service.cachedThumbnail(path, threadID: threadID); failed = false
+            if image != nil { return }
+            do {
+                let loaded = try await service.imageThumbnail(path, threadID: threadID)
+                if !Task.isCancelled { image = loaded }
+            }
             catch { if !Task.isCancelled { failed = true } }
         }
     }

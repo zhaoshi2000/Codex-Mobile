@@ -1,4 +1,6 @@
-# AstroGate 管家 0.4.15
+# AstroGate 管家 0.4.16
+
+本版增加同步到电脑的对话重命名；发送图片独立显示在文字气泡上方，移除“你”标签；最终回复在分支按钮右侧显示电脑记录的完成时间。已发送的原生附件支持跨目录预览。
 
 SwiftUI 文件管理器，支持本地文件浏览与操作、文本编辑、双窗口、SFTP、SSH 终端、Codex 电脑连接和 OpenClaw 聊天。
 
@@ -69,7 +71,7 @@ SwiftUI 文件管理器，支持本地文件浏览与操作、文本编辑、双
 
 Windows 便携包请到 [Releases](https://github.com/zhaoshi2000/Codex-Mobile/releases) 下载，解压后双击 `Open AstroGate Connect.cmd`。电脑需打开并登录 Codex，首次使用填写中转 WSS 地址和连接密钥。
 
-iOS 源码版本为 0.4.15（22），最低支持 iOS 17。请在 Xcode 工程中配置自己的 Bundle ID、Team 和 Provisioning Profile，随附脚本与 ExportOptions.plist 中的 YOUR_* 占位符也需替换为同一套签名配置。GitHub Actions 手动构建需要 IOS_P12_BASE64、IOS_P12_PASSWORD、IOS_PROFILE_BASE64 三个仓库密钥。
+iOS 源码版本为 0.4.16（23），最低支持 iOS 17。请在 Xcode 工程中配置自己的 Bundle ID、Team 和 Provisioning Profile，随附脚本与 ExportOptions.plist 中的 YOUR_* 占位符也需替换为同一套签名配置。GitHub Actions 手动构建需要 IOS_P12_BASE64、IOS_P12_PASSWORD、IOS_PROFILE_BASE64 三个仓库密钥。
 
 公开仓库提供源码与 Windows 包。iOS 安装需自行使用有效证书签名，Ad Hoc 分发要求设备已登记到描述文件。
 
