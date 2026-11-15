@@ -164,6 +164,25 @@ export class DesktopIPC extends EventEmitter {
       restoreMessage: { id: messageId, text, createdAt: Date.now(), context: { workspaceRoots: [], commentAttachments: [] } },
     }, 1, owner);
   }
+  // Reserve/complete inserts one native queued message without replacing other
+  // Desktop windows' queue. Desktop persists it and owns automatic dispatch.
+  async queue(threadId, text, messageId, attachments = [], cwd) {
+    const owner = await this.owner(threadId);
+    const message = { id: messageId, text: text || "请查看附件", createdAt: Date.now(), acceptedAtMs: Date.now(), cwd,
+      context: { prompt: text || "请查看附件", addedFiles: [], commentAttachments: [],
+        fileAttachments: attachments.filter(a => !a.image).map(a => ({ label: a.name, path: a.path, fsPath: a.path })),
+        imageAttachments: attachments.filter(a => a.image).map(a => ({ src: a.path, localPath: a.path, filename: a.name })) } };
+    const write = value => this.request("thread-follower-set-queued-follow-ups-state", {
+      conversationId: threadId, state: { [threadId]: [value] }, preparationMessageId: messageId,
+    }, 3, owner);
+    await write({ ...message, preparation: {} });
+    await write(message);
+  }
+  async removeQueued(threadId, messageId) {
+    const owner = await this.owner(threadId);
+    const reply = await this.request("thread-follower-remove-queued-message", { conversationId: threadId, messageId }, 1, owner);
+    return reply.result?.removed;
+  }
   async modelSettings(threadId) {
     const owner = await this.owner(threadId);
     const reply = await this.request("thread-follower-read-model-settings", { conversationId: threadId }, 1, owner);

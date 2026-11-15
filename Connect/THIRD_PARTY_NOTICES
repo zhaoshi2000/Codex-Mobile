@@ -3,3 +3,8 @@ https://github.com/Emanuele-web04/remodex
 Copyright Remodex contributors. Licensed under Apache License 2.0.
 The initial adapter implementation is original; no bundled Codex desktop source is distributed.
 Runtime dependencies retain their own package licenses (ws: MIT; qrcode: MIT).
+
+Image thumbnails use sharp (Apache-2.0) and libvips (LGPL-2.1-or-later).
+https://github.com/lovell/sharp
+https://github.com/libvips/libvips
+Bundled dependency licenses are retained under node_modules in the Windows ZIP.

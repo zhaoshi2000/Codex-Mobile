@@ -1,8 +1,11 @@
-# AstroGate Connect — 0.4.10
+# AstroGate Connect — 0.4.15
 
 手机在 AstroGate 管家的 Codex 页选择电脑 → 项目 → 原对话。执行仍由该电脑的 Codex 桌面版负责，使用电脑现有登录和会话设置。无需把 OpenAI 密钥传给手机或中转。
 
 ## 已实现
+
+0.4.15：运行中发送进入 Desktop 原生持久队列（reserve/complete v3），关闭手机后仍由电脑接续。等待区可“引导”或移除手机发起的消息；从电脑发起的等待消息也会显示，继续在电脑管理。引导先原子移出原生队列，已消费消息不能重发，结果不明时不自动重试。图片按需传输 240×240 JPEG 缩略图，手机内存缓存最多 36 张 / 8 MB；点按才下载原图。命令折叠摘要只显示组内最新一条，不包含命令输出。
+
 
 0.4.9：历史/实时消息包含 startedAtMs 和有界 commandExecution 折叠摘要，commandDetails 仅按需返回指定会话/轮次内的命令记录（命令最多 16K 字符、输出末尾 32K 字符）。不返回推理内容。手机按原始时间排序并按连续轮次显示。
 
@@ -10,7 +13,7 @@
 
 0.4.7 新增 `navigation` / `pinThread` / `markRead` / `models` / `setModel` / `forkThread`。`threads.limit=20` 返回 20 条；省略仍兼容旧版 10 条。置顶覆盖和已读时间按已配对手机公钥隔离，`navigation.json` 只存元数据。运行状态由桌面 v13 快照/补丁提供，观察到 active→idle 后持久记录完成时间。断线期间没有观测到的事件不推断为完成。
 
-模型通过 Desktop owner 的 read-model-settings / update-thread-settings v2 读取与更新，只允许当前供应商列表中的模型，保留兼容的推理强度，不改变权限。运行中消息使用 follower-steer-turn；空闲时使用 start-turn，均复用去重账本。分支调用短生命周期 app-server 的 thread/fork(lastTurnId)，释放写锁后交给 Desktop，禁止自动延续继承目标。
+模型通过 Desktop owner 的 read-model-settings / update-thread-settings v2 读取与更新，只允许当前供应商列表中的模型，保留兼容的推理强度，不改变权限。运行中消息默认进入桌面原生等待队列，只有点“引导”才使用 follower-steer-turn；空闲时使用 start-turn，均复用去重账本。分支调用短生命周期 app-server 的 thread/fork(lastTurnId)，释放写锁后交给 Desktop，禁止自动延续继承目标。
 
 - 多电脑二维码配对，电脑身份固定，手机密钥保存在 Keychain。
 - 默认读取本机 Codex 的项目名称和真实会话归属；项目和最近对话同屏显示。对话按更新时间倒序，手机默认每次 20 条，“更多”加载下一页。

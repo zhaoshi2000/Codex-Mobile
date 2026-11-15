@@ -16,13 +16,3 @@ DerivedData/
 
 # macOS
 .DS_Store
-
-*.p8
-*.p12
-*.mobileprovision
-*.pem
-*.key
-relay.token
-device.json
-connection-status.json
-Runtime/

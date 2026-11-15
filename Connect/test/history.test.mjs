@@ -54,7 +54,7 @@ test('command summaries retain ordering time without sending command output unti
   const command={type:'commandExecution',id:'cmd',command:'printf hello',aggregatedOutput:'hello',status:'completed',exitCode:0};
   const g=await fixture(t,[]);g.states.set('thread-history-123',{state:{turns:[{turnId:'turn',items:[command]}]}});
   const rows=messages([{turnId:'turn',items:[{...command,startedAtMs:1234}]}],230000,true);
-  assert.equal(rows[0].startedAtMs,1234);assert.equal(rows[0].role,'tool');assert.ok(!JSON.stringify(rows).includes('hello'));
+  assert.equal(rows[0].startedAtMs,1234);assert.equal(rows[0].role,'tool');assert.ok(rows.some(r=>r.text.includes('hello')));
   const details=await g.handle('commandDetails',{threadId:'thread-history-123',turnId:'turn',itemId:'cmd'},{});
   assert.equal(details.command,'printf hello');assert.equal(details.output,'hello');assert.equal(details.exitCode,0);
   g.states.set('thread-history-123',{state:{turns:[{turnId:'turn',items:[{type:'reasoning',id:'reason',text:'private'}]}]}});

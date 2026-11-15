@@ -25,15 +25,19 @@ export class Gateway {
     this.ipc = ipc;
     this.rootPaths = roots;
     this.stateDir = stateDir;
+    this.codexHome = codexHome;
+    this.queued = new Map();
+    this.thumbnails = new Map();
     this.leases = new Map();
     this.uploads = new Uploads(stateDir);
     this.monitors = new Map();
+    this.pendingQueued = new Map();
     this.subscribers = new Map();
     this.states = new Map();
     this.timers = new Map();
     if (desktopCatalog) {
       this.catalog = new DesktopCatalog({ rpc, codexHome });
-      this.activity = new DesktopActivity({ rpc, ipc, catalog: this.catalog, onCompleted: (id, at) => { this.completedThreads[id] = at; this.completedThreadProjects[id] = this.activity.rows.get(id)?.projectId || null; this.saveNavigation().catch(() => {}); }, isNeeded: id => this.monitors.has(id) || [...this.subscribers.values()].some(s => s.threadId === id) });
+      this.activity = new DesktopActivity({ rpc, ipc, catalog: this.catalog, onCompleted: (id, at) => { this.completedThreads[id] = at; this.completedThreadProjects[id] = this.activity.rows.get(id)?.projectId || null; this.saveNavigation().catch(() => {}); }, isNeeded: id => this.pendingQueued.has(id) || this.monitors.has(id) || [...this.subscribers.values()].some(s => s.threadId === id) });
     }
   }
   async init() {
@@ -48,11 +52,18 @@ export class Gateway {
       path.join(this.stateDir, "operations.json"),
       {},
     );
+    for (const [id, record] of Object.entries(this.ledger)) {
+      if (record.mode === "queued" && !record.queueAction && !record.completedAt && Date.now() - record.at < 86400000) {
+        if (!this.pendingQueued.has(record.threadId)) this.pendingQueued.set(record.threadId, new Set());
+        this.pendingQueued.get(record.threadId).add(id);
+        this.ipc.follow(record.threadId);
+      }
+    }
     this.navigation = await readJSON(path.join(this.stateDir, "navigation.json"), { peers: {}, completed: {} });
     this.completedThreads = this.navigation.completed;
     this.completedThreadProjects = this.navigation.projects ||= {};
     this.ipc.on("broadcast", (m) => this.onBroadcast(m));
-    this.ipc.on("closed", () => { this.states.clear(); for (const s of this.subscribers.values()) s.peer.emit?.({ event: "notice", message: "电脑通道重连中，请等待状态恢复" }); });
+    this.ipc.on("closed", () => { this.states.clear(); this.queued.clear(); for (const s of this.subscribers.values()) s.peer.emit?.({ event: "notice", message: "电脑通道重连中，请等待状态恢复" }); });
     this.leaseTimer = setInterval(
       () => this.cleanLeases().catch(() => {}),
       60000,
@@ -237,14 +248,14 @@ export class Gateway {
     return { deleted: true };
   }
   async handle(method, p, peer) {
-    if (method === "filePrepare" || method.startsWith("upload")) {
+    if (method === "filePrepare" || method === "imageThumbnail" || method.startsWith("upload")) {
       const run = (this.fileQueue || Promise.resolve()).then(() =>
         this.dispatch(method, p, peer),
       );
       this.fileQueue = run.catch(() => {});
       return run;
     }
-    if (["send", "answer", "createThread", "deleteThread", "forkThread", "setModel", "pinThread", "markRead"].includes(method)) {
+    if (["send", "steerQueued", "removeQueued", "answer", "createThread", "deleteThread", "forkThread", "setModel", "pinThread", "markRead"].includes(method)) {
       const run = (this.sendQueue || Promise.resolve()).then(() =>
         this.dispatch(method, p, peer),
       );
@@ -403,7 +414,7 @@ export class Gateway {
         return record;
       }
       case "send": {
-        await this.authorizeThread(p.threadId);
+        const thread = await this.authorizeThread(p.threadId);
         if (
           typeof p.text !== "string" ||
           (!p.text.trim() && !p.attachments?.length) ||
@@ -435,16 +446,44 @@ export class Gateway {
         this.ledger[p.messageId] = record;
         await this.saveLedger();
         try {
-          this.monitors.set(p.threadId, { messageId: p.messageId, active: false });
           this.ipc.follow(p.threadId);
           if (this.states.get(p.threadId)?.state.threadRuntimeStatus?.type === "active") {
-            await this.ipc.steer(p.threadId, p.text, p.messageId, attachments);
-            record.mode = "steer";
-          } else { await this.ipc.send(p.threadId, p.text, p.messageId, attachments); record.mode = "start"; }
+            record.text = p.text; record.attachments = attachments; record.mode = "queued";
+            await this.saveLedger();
+            if (!this.pendingQueued.has(p.threadId)) this.pendingQueued.set(p.threadId, new Set());
+            this.pendingQueued.get(p.threadId).add(p.messageId);
+            await this.ipc.queue(p.threadId, p.text, p.messageId, attachments, thread.cwd);
+          } else { this.monitors.set(p.threadId, { messageId: p.messageId, active: false }); await this.ipc.send(p.threadId, p.text, p.messageId, attachments); record.mode = "start"; }
           record.state = "accepted";
         } catch (e) {
           record.error = "未确认是否已送达，请查看原对话后再决定是否重发";
         }
+        await this.saveLedger();
+        return record;
+      }
+      case "queued":
+        await this.authorizeThread(p.threadId);
+        return { messages: await this.queueRows(p.threadId, peer) };
+      case "steerQueued":
+      case "removeQueued": {
+        await this.authorizeThread(p.threadId);
+        const record = this.ledger[p.messageId];
+        if (!record || record.owner !== peer.publicKey || record.threadId !== p.threadId || record.mode !== "queued") throw Error("这条等待消息请在电脑操作");
+        if (record.queueAction) return record;
+        const removed = await this.ipc.removeQueued(p.threadId, p.messageId);
+        if (!removed) throw Error("消息已发送或已移除，请刷新对话");
+        record.queueAction = method; record.state = "unknown";
+        this.pendingQueued.get(p.threadId)?.delete(p.messageId);
+        if (!this.pendingQueued.get(p.threadId)?.size) this.pendingQueued.delete(p.threadId);
+        await this.saveLedger();
+        if (method === "steerQueued") {
+          this.monitors.set(p.threadId, { messageId: p.messageId, active: false });
+          try {
+            if (this.states.get(p.threadId)?.state.threadRuntimeStatus?.type === "active") await this.ipc.steer(p.threadId, record.text, p.messageId, record.attachments);
+            else await this.ipc.send(p.threadId, record.text, p.messageId, record.attachments);
+            record.state = "accepted";
+          } catch { record.error = "引导送达待确认，请查看电脑原对话，不要重复发送"; }
+        } else record.state = "accepted";
         await this.saveLedger();
         return record;
       }
@@ -489,6 +528,23 @@ export class Gateway {
           } catch {}
         }
         return { files: rows, limited: entries.length > 200 };
+      }
+      case "imageThumbnail": {
+        const project = await this.fileScope(p.projectId);
+        if (project.virtualRoots) throw Error("请选择图片");
+        const real = await this.downloadPath(p, project);
+        if (!/\.(png|jpe?g|webp|gif|heic|heif|bmp|tiff?)$/i.test(real)) throw Error("不是图片附件");
+        const stat = await fs.stat(real);
+        if (!stat.isFile() || stat.size > 25 * 1024 * 1024) throw Error("图片过大，请点按查看原图");
+        const key = real + ":" + stat.mtimeMs + ":" + stat.size;
+        if (this.thumbnails.has(key)) return this.thumbnails.get(key);
+        const { default: sharp } = await import("sharp");
+        const data = await sharp(real, { limitInputPixels: 80000000, pages: 1 }).rotate().resize(240, 240, { fit: "cover" }).jpeg({ quality: 75 }).toBuffer();
+        if (data.length > 150000) throw Error("缩略图过大");
+        const result = { data: data.toString("base64") };
+        this.thumbnails.set(key, result);
+        while (this.thumbnails.size > 24) this.thumbnails.delete(this.thumbnails.keys().next().value);
+        return result;
       }
       case "filePrepare": {
         const project = await this.fileScope(p.projectId, p.relativePath || "");
@@ -647,10 +703,48 @@ export class Gateway {
       this.timers.delete(sub.threadId);
     }
   }
+  async completeQueuedTurns(threadId, turns) {
+    const pending = this.pendingQueued.get(threadId);
+    if (!pending) return;
+    let changed = false;
+    for (const id of pending) {
+      const record = this.ledger[id];
+      if (!record || Date.now() - record.at >= 86400000) { pending.delete(id); continue; }
+      const turn = turns.find(t => t.params?.clientUserMessageId === id ||
+        (record.startedTurnId && (t.id || t.turnId) === record.startedTurnId) ||
+        t.items?.some(i => i.type === "userMessage" && [i.id, i.clientId, i.clientMessageId].includes(id)));
+      if (!turn) continue;
+      if (!record.startedTurnId) { record.startedTurnId = turn.id || turn.turnId; changed = true; }
+      if (["completed", "interrupted", "failed"].includes(turn.status)) {
+        record.completedAt = Date.now(); pending.delete(id); changed = true;
+        for (const sub of this.subscribers.values()) if (sub.peer.publicKey === record.owner) sub.peer.emit({ event: "completed", id, threadId });
+      }
+    }
+    if (!pending.size) this.pendingQueued.delete(threadId);
+    if (changed) await this.saveLedger();
+  }
+  async queueRows(threadId, peer) {
+    let rows = this.queued.get(threadId);
+    if (!rows) {
+      const state = this.codexHome ? await readJSON(path.join(this.codexHome, ".codex-global-state.json"), {}) : {};
+      rows = state["queued-follow-ups"]?.[threadId] || [];
+    }
+    return rows.slice(0, 50).map(m => ({ id: m.id, text: String(m.text || m.context?.prompt || "附件消息").slice(0, 32000),
+      editable: this.ledger[m.id]?.owner === peer.publicKey && !this.ledger[m.id]?.queueAction,
+      preparing: !!m.preparation, error: m.pausedReason || null }));
+  }
   onBroadcast(m) {
+    if (m.method === "thread-queued-followups-changed" && m.version === 3) {
+      const id = m.params?.conversationId;
+      if (m.params?.hostId !== "local" || !Array.isArray(m.params.messages)) return;
+      this.queued.set(id, m.params.messages);
+      while (this.queued.size > 100) this.queued.delete(this.queued.keys().next().value);
+      for (const sub of this.subscribers.values()) if (sub.threadId === id) this.queueRows(id, sub.peer).then(messages => sub.peer.emit({ event: "queued", threadId: id, messages })).catch(() => {});
+      return;
+    }
     if (m.method !== "thread-stream-state-changed") return;
     const id = m.params?.conversationId;
-    if (!this.monitors.has(id) && ![...this.subscribers.values()].some((s) => s.threadId === id)) return;
+    if (!this.pendingQueued.has(id) && !this.monitors.has(id) && ![...this.subscribers.values()].some((s) => s.threadId === id)) return;
     if (m.version !== 13) {
       for (const s of this.subscribers.values())
         if (s.threadId === id)
@@ -675,6 +769,7 @@ export class Gateway {
         const s = this.states.get(id)?.state;
         if (!s) return;
         const turns = desktopTurns(s);
+        await this.completeQueuedTurns(id, turns);
         const groups = questionGroups(s, turns);
         const active = turns.find((t) =>
           ["inProgress", "running", "active"].includes(t.status),
@@ -700,7 +795,7 @@ export class Gateway {
           if (record) { record.completedAt = Date.now(); await this.saveLedger(); }
           this.monitors.delete(id);
           for (const x of this.subscribers.values()) if (x.peer.publicKey === record?.owner) x.peer.emit({ event: "completed", id: monitor.messageId, threadId: id });
-          if (!this.activity?.followed.has(id) && ![...this.subscribers.values()].some(x => x.threadId === id)) { this.ipc.follow(id, false); this.states.delete(id); }
+          if (!this.pendingQueued.has(id) && !this.activity?.followed.has(id) && ![...this.subscribers.values()].some(x => x.threadId === id)) { this.ipc.follow(id, false); this.states.delete(id); }
         }
         if (event.status === "idle") {
           try {
@@ -725,6 +820,8 @@ export class Gateway {
     this.activity?.close();
     clearInterval(this.leaseTimer);
     await this.uploads.close();
+    for (const id of this.pendingQueued.keys()) { try { this.ipc.follow(id, false); } catch {} }
+    this.pendingQueued.clear();
     for (const id of this.monitors.keys()) { try { this.ipc.follow(id, false); } catch {} }
     this.monitors.clear();
     for (const id of [...this.subscribers.keys()]) this.unwatch(id);

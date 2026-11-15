@@ -1,8 +1,15 @@
-# AstroGate 管家 0.4.14
+# AstroGate 管家 0.4.15
 
 SwiftUI 文件管理器，支持本地文件浏览与操作、文本编辑、双窗口、SFTP、SSH 终端、Codex 电脑连接和 OpenClaw 聊天。
 
 ## 本版改动
+
+- 处理中发送消息先进入电脑原生等待队列，点“引导”立即发送到当前轮次；队列保存在电脑，手机重进仍可查看。
+- 已发送图片显示单行方形叠放预览，主图后最多两张侧边预览；左右滑动切换，点按查看原图。按需加载小缩略图。
+- 每组执行命令收起时只显示最新一条单行摘要，展开才显示此前命令及按需读取的详情。
+
+以下为 0.4.14 保留功能：
+
 
 - 聊天页三横线菜单从左侧滑出，点抽屉外侧或再次点三横线关闭。
 - IPA 详情页和下载成功卡的“用全能签签名”直接打开系统分享菜单，选全能签后传入当前 IPA。签名在全能签完成。
@@ -62,7 +69,7 @@ SwiftUI 文件管理器，支持本地文件浏览与操作、文本编辑、双
 
 Windows 便携包请到 [Releases](https://github.com/zhaoshi2000/Codex-Mobile/releases) 下载，解压后双击 `Open AstroGate Connect.cmd`。电脑需打开并登录 Codex，首次使用填写中转 WSS 地址和连接密钥。
 
-iOS 源码版本为 0.4.14（21），最低支持 iOS 17。请在 Xcode 工程中配置自己的 Bundle ID、Team 和 Provisioning Profile，随附脚本与 ExportOptions.plist 中的 YOUR_* 占位符也需替换为同一套签名配置。GitHub Actions 手动构建需要 IOS_P12_BASE64、IOS_P12_PASSWORD、IOS_PROFILE_BASE64 三个仓库密钥。
+iOS 源码版本为 0.4.15（22），最低支持 iOS 17。请在 Xcode 工程中配置自己的 Bundle ID、Team 和 Provisioning Profile，随附脚本与 ExportOptions.plist 中的 YOUR_* 占位符也需替换为同一套签名配置。GitHub Actions 手动构建需要 IOS_P12_BASE64、IOS_P12_PASSWORD、IOS_PROFILE_BASE64 三个仓库密钥。
 
 公开仓库提供源码与 Windows 包。iOS 安装需自行使用有效证书签名，Ad Hoc 分发要求设备已登记到描述文件。
 

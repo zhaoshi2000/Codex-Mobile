@@ -104,3 +104,39 @@ enum CodexChatTimeline {
         return result
     }
 }
+
+
+struct CodexQueuedMessage: Identifiable {
+    let id: String
+    let text: String
+    let editable: Bool
+    let preparing: Bool
+    let error: String?
+    init?(_ json: [String: Any]) {
+        guard let id = json["id"] as? String else { return nil }
+        self.id = id; text = json["text"] as? String ?? "附件消息"
+        editable = json["editable"] as? Bool ?? false; preparing = json["preparing"] as? Bool ?? false; error = json["error"] as? String
+    }
+}
+
+// Extract only attachment links; ordinary Markdown images/links remain intact.
+struct CodexMessageImages {
+    let paths: [String]
+    let body: String
+    init(_ text: String) {
+        let pattern = #"📎\s*\[[^\]\n]*\]\(<([^>\n]+)>\)"#
+        let regex = try! NSRegularExpression(pattern: pattern)
+        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        var paths: [String] = [], body = text
+        var ranges: [Range<String.Index>] = []
+        for match in matches {
+            guard let range = Range(match.range(at: 1), in: text), let whole = Range(match.range, in: text) else { continue }
+            let path = String(text[range])
+            if ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp", "tif", "tiff"].contains(URL(fileURLWithPath: path).pathExtension.lowercased()) {
+                if !paths.contains(path) { paths.append(path) }; ranges.append(whole)
+            }
+        }
+        for range in ranges.reversed() { body.removeSubrange(range) }
+        self.paths = paths; self.body = body.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}

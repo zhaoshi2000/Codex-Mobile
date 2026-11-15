@@ -39,7 +39,7 @@ export class Uploads {
     this.saved[u.id] = { id: u.id, owner: u.owner, threadId: u.threadId, path: target, name: u.name, image, sha256: u.sha256 };
     await saveJSON(path.join(this.dir, 'index.json'), this.saved);
     await this.cancel(p, peer);
-    return { id: u.id, name: u.name, image };
+    return { id: u.id, name: u.name, image, path: target };
   }
   async resolve(ids, threadId, peer) {
     if (!Array.isArray(ids) || ids.length > 6 || new Set(ids).size !== ids.length) throw Error('附件数量无效');

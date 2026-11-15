@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import SwiftUI
+import ImageIO
 
 struct CodexDevice: Codable, Identifiable {
     var id: String { hostId }
@@ -78,6 +79,9 @@ extension Data {
     @Published var connected = false
     @Published var status = "未连接"
     @Published var error: String?
+    @Published var queuedMessages: [CodexQueuedMessage] = []
+    private let imageCache = NSCache<NSString, UIImage>()
+    private var uploadedPaths: [String: String] = [:]
     @Published var messages: [CodexChatMessage] = []
     @Published var olderCursor: String?
     @Published var running = false
@@ -285,6 +289,9 @@ extension Data {
             let progress = value["progress"] as? [String: Any] ?? [:]
             progressLabel = progress["label"] as? String ?? ""
             progressSteps = (progress["steps"] as? [[String: Any]] ?? []).compactMap(CodexProgressStep.init)
+        case "queued":
+            guard value["threadId"] as? String == selectedThread else { return }
+            queuedMessages = (value["messages"] as? [[String: Any]] ?? []).compactMap(CodexQueuedMessage.init)
         case "history":
             guard value["threadId"] as? String == selectedThread else { return }
             if !showingOlder {
@@ -329,7 +336,7 @@ extension Data {
         selection = UUID(); let token = selection
         writable = false
         if !connected { await connect(); if selectedThread == threadID { return } }
-        running = false; notice = nil; questions = []; progressLabel = ""; progressSteps = []; currentModel = ""; currentEffort = ""; models = []; selectedThread = threadID; showingOlder = false; messages = []; olderCursor = nil; turnID = nil; approvalNeeded = false; error = nil
+        running = false; notice = nil; questions = []; queuedMessages = []; progressLabel = ""; progressSteps = []; currentModel = ""; currentEffort = ""; models = []; selectedThread = threadID; showingOlder = false; messages = []; olderCursor = nil; turnID = nil; approvalNeeded = false; error = nil
         do {
             let page = try await request("history", ["threadId": threadID])
             guard selectedThread == threadID, selection == token else { return }
@@ -347,9 +354,10 @@ extension Data {
             }
             guard selection == token else { return }
             writable = result["writable"] as? Bool ?? false; status = result["message"] as? String ?? "已连接"
+            await refreshQueue(threadID)
         } catch { self.error = error.localizedDescription }
     }
-    func leaveChat(_ expectedID: String? = nil) { if let expectedID, selectedThread != expectedID { return }; let leaving = selectedThread; selection = UUID(); selectedThread = nil; messages = []; olderCursor = nil; writable = false; running = false; Task { if let leaving { _ = try? await request("unwatch", ["threadId": leaving]) } } }
+    func leaveChat(_ expectedID: String? = nil) { if let expectedID, selectedThread != expectedID { return }; let leaving = selectedThread; selection = UUID(); selectedThread = nil; messages = []; queuedMessages = []; olderCursor = nil; writable = false; running = false; Task { if let leaving { _ = try? await request("unwatch", ["threadId": leaving]) } } }
     func older(_ threadID: String) async {
         guard let cursor = olderCursor else { return }
         showingOlder = true
@@ -360,20 +368,48 @@ extension Data {
             messages = []; merge(page["messages"] as? [[String: Any]] ?? [], history: true); olderCursor = page["nextCursor"] as? String
         } catch { self.error = error.localizedDescription }
     }
-    func showOutgoing(_ text: String, to threadID: String, messageID: String, names: [String] = []) {
+    func showOutgoing(_ text: String, to threadID: String, messageID: String, names: [String] = [], displayText: String? = nil) {
         guard optimistic[messageID] == nil else { return }
-        let display = ([text] + names.map { "📎 " + $0 }).filter { !$0.isEmpty }.joined(separator: "\n")
+        let display = displayText ?? ([text] + names.map { "📎 " + $0 }).filter { !$0.isEmpty }.joined(separator: "\n")
         let bubble = CodexChatMessage(id: messageID, text: display, delivery: "正在发送…")
         optimistic[messageID] = (threadID, text.isEmpty ? "请查看附件" : text, bubble, Set(messages.map(\.id)))
         messages.append(bubble)
     }
     func send(_ text: String, to threadID: String, messageID: String, attachments: [String] = []) async throws {
-        showOutgoing(text, to: threadID, messageID: messageID)
+        if !running {
+            dismissOutgoing(messageID)
+            let links = attachments.compactMap { uploadedPaths[$0] }.map { "📎 [" + URL(fileURLWithPath: $0).lastPathComponent + "](<" + $0 + ">)" }
+            showOutgoing(text, to: threadID, messageID: messageID, displayText: ([text] + links).joined(separator: "\n"))
+        }
         do {
             let result = try await request("send", ["threadId": threadID, "text": text, "messageId": messageID, "attachments": attachments])
             guard result["state"] as? String == "accepted" else { throw CodexConnectError(message: result["error"] as? String ?? "未确认送达，请刷新对话核实。") }
-            updateDelivery(messageID, "已送达"); running = true
+            if result["mode"] as? String == "queued" { dismissOutgoing(messageID); await refreshQueue(threadID) }
+            else { updateDelivery(messageID, "已送达"); running = true }
+            for id in attachments { uploadedPaths.removeValue(forKey: id) }
         } catch { updateDelivery(messageID, "送达待确认"); throw error }
+    }
+    func refreshQueue(_ threadID: String) async {
+        do { let result = try await request("queued", ["threadId": threadID]); if selectedThread == threadID { queuedMessages = (result["messages"] as? [[String: Any]] ?? []).compactMap(CodexQueuedMessage.init) } }
+        catch { self.error = error.localizedDescription }
+    }
+    func changeQueued(_ messageID: String, threadID: String, steer: Bool) async throws {
+        let result = try await request(steer ? "steerQueued" : "removeQueued", ["threadId": threadID, "messageId": messageID])
+        await refreshQueue(threadID)
+        guard result["state"] as? String == "accepted" else { throw CodexConnectError(message: result["error"] as? String ?? "送达待确认，请查看电脑原对话") }
+    }
+    func imageThumbnail(_ path: String, threadID: String) async throws -> UIImage {
+        let key = (threadID + ":" + path) as NSString
+        if let image = imageCache.object(forKey: key) { return image }
+        let result = try await request("imageThumbnail", ["projectId": "thread:" + threadID, "absolutePath": path])
+        try Task.checkCancellation()
+        guard let encoded = result["data"] as? String, let data = Data(base64Encoded: encoded), data.count <= 150000,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 240, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else { throw CodexConnectError(message: "缩略图读取失败") }
+        let image = UIImage(cgImage: cg)
+        imageCache.countLimit = 36; imageCache.totalCostLimit = 8 * 1024 * 1024
+        imageCache.setObject(image, forKey: key, cost: cg.bytesPerRow * cg.height)
+        return image
     }
     func updateDelivery(_ id: String, _ state: String) {
         if var p = optimistic[id] { p.bubble.delivery = state; optimistic[id] = p }
@@ -399,7 +435,9 @@ extension Data {
                 guard ack["offset"] as? Int == offset else { throw CodexConnectError(message: "附件分块确认失败") }
                 uploadProgress = Double(offset) / Double(max(1, size))
             }
-            _ = try await request("uploadFinish", ["id": id]); return id
+            let complete = try await request("uploadFinish", ["id": id])
+            if let path = complete["path"] as? String { uploadedPaths[id] = path }
+            return id
         } catch { _ = try? await request("uploadCancel", ["id": id]); throw error }
     }
     func markRead(_ threadID: String) async {

@@ -379,6 +379,7 @@ private struct CodexChatContent: View {
             }
             }
             if uncertain { Text("送达状态待核实。先点“回到最新”查看；重试将沿用原消息 ID，避免重复提交。").font(.caption).foregroundStyle(.orange).padding(.horizontal) }
+            CodexQueuedCards(service: service, threadID: thread.id).padding(.horizontal)
             CodexDownloadCard(service: service).padding(.horizontal)
             if let notice = (service.running ? nil : service.notice) { Text(notice).font(.caption).foregroundStyle(.secondary).padding(.horizontal) }
             if loadingPhoto { ProgressView("正在读取照片…").padding(.horizontal) }
@@ -534,7 +535,7 @@ private struct CodexChatContent: View {
         sending = true; service.notice = nil; followOutput = true; defer { sending = false }
         if pendingID == nil { pendingID = UUID().uuidString; pendingText = draft }
         let id = pendingID!
-        service.showOutgoing(pendingText ?? draft, to: thread.id, messageID: id, names: attachments.map(\.lastPathComponent))
+        if !service.running { service.showOutgoing(pendingText ?? draft, to: thread.id, messageID: id, names: attachments.map(\.lastPathComponent)) }
         var submitted = false
         do {
             if !uncertain { for url in attachments.dropFirst(uploadedIDs.count) { uploadedIDs.append(try await service.upload(url, threadID: thread.id)) } }

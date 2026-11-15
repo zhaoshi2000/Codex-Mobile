@@ -86,7 +86,7 @@ export function messages(turns, budget = 230000, includeCommands = false) {
     for (const i of turn.items || []) {
       const type = (i.type || "").toLowerCase();
       if (includeCommands && type === "commandexecution") {
-        out.push({ id: String(i.id), role: "tool", text: "执行命令", turnId: turn.id || turn.turnId,
+        out.push({ id: String(i.id), role: "tool", text: commandSummary(i.command), turnId: turn.id || turn.turnId,
           startedAtMs: i.startedAtMs || turn.turnStartedAtMs || null, toolStatus: i.status || "unknown" });
       }
       if (type !== "usermessage" && type !== "agentmessage") continue;
@@ -144,4 +144,9 @@ export function progress(state) {
   // Show a generic thinking state, never forward private reasoning content.
   const label = last?.type === "agentMessage" && !last.completedAtMs ? "正在输出…" : last?.type === "reasoning" ? "正在思考…" : steps.some(s => s.active) ? "正在执行操作…" : "正在处理…";
   return { label, steps };
+}
+
+export function commandSummary(command) {
+  const text = (Array.isArray(command) ? command.join(" ") : String(command || "执行命令")).replace(/\s+/g, " ").trim();
+  return text.slice(0, 600);
 }

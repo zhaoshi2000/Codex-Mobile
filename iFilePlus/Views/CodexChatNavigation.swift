@@ -71,7 +71,7 @@ struct CodexCommandRow: View {
             }
             }
         } label: {
-            Label(item.toolStatus == "inProgress" ? "正在运行命令" : "运行了命令", systemImage: "terminal").font(.caption).foregroundStyle(.secondary)
+            Label((item.toolStatus == "inProgress" ? "正在运行 " : "") + item.text, systemImage: "terminal").font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
         }.tint(.secondary)
     }
 }
@@ -103,7 +103,7 @@ struct CodexCommandGroup: View {
                 .clipped()
             }
         } label: {
-            Label(items.contains(where: { $0.toolStatus == "inProgress" }) ? "正在执行 \(items.count) 个命令" : "执行了 \(items.count) 个命令", systemImage: "terminal").font(.caption).foregroundStyle(.secondary)
+            Label((items.last?.toolStatus == "inProgress" ? "正在运行 " : "") + (items.last?.text ?? "运行了命令"), systemImage: "terminal").font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
         }.tint(.secondary)
     }
 }
@@ -122,7 +122,11 @@ struct CodexChatGroupView: View {
             ForEach(group.blocks) { block in
                 if block.isCommands { CodexCommandGroup(service: service, threadID: threadID, items: block.items) }
                 else if let message = block.items.first {
-                    CodexMarkdownView(text: message.text).textSelection(.enabled)
+                    let images = CodexMessageImages(message.role == "user" ? message.text : "")
+                    if !images.paths.isEmpty {
+                        HStack { Spacer(minLength: 0); CodexImageStack(service: service, threadID: threadID, paths: images.paths, open: openFile) }
+                    }
+                    CodexMarkdownView(text: message.role == "user" ? images.body : message.text).textSelection(.enabled)
                         .environment(\.openURL, OpenURLAction { url in
                             if url.scheme == "ifilepc", let data = Data(codexBase64URL: url.lastPathComponent), let path = String(data: data, encoding: .utf8) { openFile(path); return .handled }
                             if ["https", "http", "mailto"].contains(url.scheme ?? "") { return .systemAction }
@@ -310,5 +314,100 @@ struct CodexChatNavigation: View {
         do {
             _ = try await service.request("pinThread", ["threadId": thread.id, "pinned": !pinned.contains(where: { $0.id == thread.id })]); await load()
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+
+struct CodexQueuedCards: View {
+    @ObservedObject var service: CodexConnectService
+    let threadID: String
+    @State private var busy: String?
+    var body: some View {
+        if !service.queuedMessages.isEmpty {
+            ScrollView(.vertical) {
+                VStack(spacing: 6) {
+                    ForEach(service.queuedMessages) { message in
+                        HStack(spacing: 10) {
+                            Image(systemName: "text.badge.clock").foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(message.text).font(.subheadline).lineLimit(2)
+                                Text(message.error ?? (message.preparing ? "正在加入队列…" : "等待当前任务完成"))
+                                    .font(.caption2).foregroundStyle(message.error == nil ? Color.secondary : Color.orange)
+                            }
+                            Spacer(minLength: 0)
+                            if message.editable {
+                                Button("引导", systemImage: "arrow.turn.down.right") { change(message, steer: true) }.font(.caption).disabled(message.preparing)
+                                Button { change(message, steer: false) } label: { Image(systemName: "trash") }.accessibilityLabel("移除等待消息")
+                            }
+                            if busy == message.id { ProgressView().controlSize(.small) }
+                        }.padding(10).background(Color.secondary.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
+                            .disabled(busy != nil || !service.connected)
+                    }
+                }
+            }.frame(height: CGFloat(min(service.queuedMessages.count, 2)) * 78)
+        }
+    }
+    private func change(_ message: CodexQueuedMessage, steer: Bool) {
+        busy = message.id
+        Task { defer { busy = nil }; do { try await service.changeQueued(message.id, threadID: threadID, steer: steer) } catch { service.error = error.localizedDescription } }
+    }
+}
+
+struct CodexImageStack: View {
+    @ObservedObject var service: CodexConnectService
+    let threadID: String
+    let paths: [String]
+    let open: (String) -> Void
+    @State private var selected = 0
+    private var index: Int { min(selected, max(0, paths.count - 1)) }
+    private var visibleCount: Int { min(3, paths.count) }
+    var body: some View {
+        VStack(spacing: 6) {
+            ZStack(alignment: .leading) {
+                ForEach(Array((0..<visibleCount).reversed()), id: \.self) { offset in
+                    let path = paths[(index + offset) % paths.count]
+                    Button { if offset == 0 { open(path) } else { selected = (index + offset) % paths.count } } label: {
+                        CodexImageThumbnail(service: service, threadID: threadID, path: path)
+                            .frame(width: 112, height: 112).clipped()
+                            .background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(.background, lineWidth: 2))
+                    }.buttonStyle(.plain)
+                        .rotationEffect(.degrees(Double(offset * 5)))
+                        .offset(x: CGFloat(offset * 18))
+                        .zIndex(Double(3 - offset))
+                        .accessibilityLabel(offset == 0 ? "查看图片 \(index + 1)，共 \(paths.count) 张" : "下一张图片")
+                }
+            }.frame(width: 112 + CGFloat(max(0, visibleCount - 1) * 18) + 12, height: 126, alignment: .leading)
+                .contentShape(Rectangle())
+                .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { value in
+                    guard paths.count > 1, abs(value.translation.width) > abs(value.translation.height) * 1.3 else { return }
+                    withAnimation(.easeInOut(duration: 0.18)) { selected = (index + (value.translation.width < 0 ? 1 : paths.count - 1)) % paths.count }
+                })
+                .accessibilityAdjustableAction { direction in
+                    guard !paths.isEmpty else { return }
+                    selected = (index + (direction == .increment ? 1 : paths.count - 1)) % paths.count
+                }
+            if paths.count > 1 { Text("\(index + 1) / \(paths.count)").font(.caption2).foregroundStyle(.secondary) }
+        }
+    }
+}
+
+struct CodexImageThumbnail: View {
+    @ObservedObject var service: CodexConnectService
+    let threadID: String
+    let path: String
+    @State private var image: UIImage?
+    @State private var failed = false
+    var body: some View {
+        ZStack {
+            if let image { Image(uiImage: image).resizable().scaledToFill() }
+            else if failed { Image(systemName: "photo").foregroundStyle(.secondary) }
+            else { ProgressView().controlSize(.small) }
+        }.task(id: path + String(service.connected)) {
+            image = nil; failed = false
+            do { image = try await service.imageThumbnail(path, threadID: threadID) }
+            catch { if !Task.isCancelled { failed = true } }
+        }
     }
 }

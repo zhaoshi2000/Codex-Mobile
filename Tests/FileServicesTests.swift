@@ -2,6 +2,15 @@ import XCTest
 @testable import FileServices
 
 final class FileServicesTests: XCTestCase {
+    func testMessageImageStackSeparatesOnlyImageAttachmentLinks() {
+        let content = "正文\n📎 [照片](<C:/folder/照片.jpg>)\n📎 [文档](<C:/folder/readme.md>)\n📎 [照片](<C:/folder/照片.jpg>)\n📎 [二](<C:/two.PNG>)"
+        let images = CodexMessageImages(content)
+        XCTAssertEqual(images.paths, ["C:/folder/照片.jpg", "C:/two.PNG"])
+        XCTAssertTrue(images.body.contains("正文")); XCTAssertTrue(images.body.contains("readme.md"))
+        XCTAssertFalse(images.body.contains("照片.jpg")); XCTAssertFalse(images.body.contains("two.PNG"))
+        XCTAssertEqual(CodexMessageImages("[普通链接](https://example.com/a.jpg)").paths, [])
+    }
+
     func testServerAIStreamRequiresCompleteCommandsAndPreservesChunks() throws {
         var stream = ServerAIStream()
         func line(_ delta: [String: Any], finish: String? = nil) throws -> String {
