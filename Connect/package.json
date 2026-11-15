@@ -1,0 +1,19 @@
+{
+  "name": "ifileplus-connect",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "relay": "node src/relay.mjs",
+    "bridge": "node src/bridge.mjs",
+    "doctor": "node src/doctor.mjs"
+  },
+  "dependencies": {
+    "qrcode": "1.5.4",
+    "ws": "8.21.0"
+  }
+}

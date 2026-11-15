@@ -1,0 +1,478 @@
+import Foundation
+import CryptoKit
+import SwiftUI
+
+struct CodexDevice: Codable, Identifiable {
+    var id: String { hostId }
+    let version: Int
+    let relay: String
+    let hostId: String
+    let hostName: String
+    let hostKey: String
+    var pairToken: String?
+    var expires: Double?
+    var alias: String?
+    var displayName: String { alias?.isEmpty == false ? alias! : hostName }
+}
+
+struct CodexRow: Identifiable, Hashable {
+    let id: String
+    let title: String
+    var path: String = ""
+    var directory: Bool = false
+    var size: Int = 0
+}
+
+struct CodexConnectError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
+extension Data {
+    init?(codexBase64URL value: String) {
+        var s = value.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        s += String(repeating: "=", count: (4 - s.count % 4) % 4)
+        self.init(base64Encoded: s)
+    }
+    var codexBase64URL: String { base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "") }
+}
+
+@MainActor final class CodexDeviceStore: ObservableObject {
+    @Published var devices: [CodexDevice] = []
+    init() {
+        if let data = UserDefaults.standard.data(forKey: "codex.devices.v1"), let saved = try? JSONDecoder().decode([CodexDevice].self, from: data) { devices = saved }
+    }
+    func add(_ uri: String) throws {
+        guard let url = URLComponents(string: uri.trimmingCharacters(in: .whitespacesAndNewlines)), url.scheme == "ifilecodex", url.host == "pair",
+              let encoded = url.queryItems?.first(where: { $0.name == "data" })?.value,
+              let data = Data(codexBase64URL: encoded), data.count < 8192 else { throw CodexConnectError(message: "请扫描电脑连接程序生成的二维码，或粘贴完整配对链接。") }
+        var device = try JSONDecoder().decode(CodexDevice.self, from: data)
+        guard device.version == 1, UUID(uuidString: device.hostId) != nil,
+              Data(codexBase64URL: device.hostKey)?.count == 32,
+              let relay = URLComponents(string: device.relay), relay.scheme == "wss", relay.host != nil,
+              relay.user == nil, relay.password == nil, relay.query == nil, relay.fragment == nil,
+              !relay.path.contains("..") else { throw CodexConnectError(message: "配对格式不受支持。手机连接需要 wss:// 加密中转地址。") }
+        guard let token = device.pairToken, token.count >= 32, (device.expires ?? 0) > Date().timeIntervalSince1970 * 1000 else { throw CodexConnectError(message: "配对码已过期，请在电脑重新启动连接程序。") }
+        if let old = devices.first(where: { $0.id == device.id }), old.hostKey != device.hostKey { throw CodexConnectError(message: "电脑的身份密钥已改变。请核实后先移除旧设备，再重新配对。") }
+        try KeychainStore.set(token, account: "codex.pair." + device.id)
+        device.alias = devices.first(where: { $0.id == device.id })?.alias
+        device.pairToken = nil; device.expires = nil
+        devices.removeAll { $0.id == device.id }; devices.append(device); save()
+    }
+    func remove(_ device: CodexDevice) {
+        CodexConnectService.remove(device.id); devices.removeAll { $0.id == device.id }; KeychainStore.delete(account: "codex.pair." + device.id); save()
+    }
+    func rename(_ device: CodexDevice, to value: String) {
+        guard let index = devices.firstIndex(where: { $0.id == device.id }) else { return }
+        let name = String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
+        guard !name.isEmpty else { return }
+        devices[index].alias = name
+        CodexConnectService.session(for: devices[index]).device = devices[index]
+        save()
+    }
+    private func save() { if let data = try? JSONEncoder().encode(devices) { UserDefaults.standard.set(data, forKey: "codex.devices.v1") } }
+}
+
+// Keeps only the selected conversation in memory. It never imports the PC's history database.
+@MainActor final class CodexConnectService: ObservableObject {
+    @Published var connected = false
+    @Published var status = "未连接"
+    @Published var error: String?
+    @Published var messages: [CodexChatMessage] = []
+    @Published var olderCursor: String?
+    @Published var running = false
+    @Published var questions: [CodexQuestionGroup] = []
+    @Published var progressLabel = ""
+    @Published var progressSteps: [CodexProgressStep] = []
+    @Published var approvalNeeded = false
+    @Published var writable = false
+    @Published var downloadState: CodexDownloadState?
+    private var downloadTask: Task<URL, Error>?
+    @Published var downloadProgress: Double?
+    @Published var uploadProgress: Double?
+    @Published var notice: String?
+    @Published var activeTasks: [CodexRow] = []
+    @Published var unreadThreads: Set<String> = []
+    @Published var runningProjects: Set<String> = []
+    @Published var unreadProjects: Set<String> = []
+    @Published var currentModel = ""
+    @Published var currentEffort = ""
+    @Published var models: [CodexRow] = []
+    @Published var activityError: String?
+    @Published var activityLimited = false
+    private var checkingActivity = false
+    private static var sessions: [String: CodexConnectService] = [:]
+    static func session(for device: CodexDevice) -> CodexConnectService { if let s = sessions[device.id] { return s }; let s = CodexConnectService(device: device); sessions[device.id] = s; return s }
+    static func resumeAll() { for s in sessions.values { Task { await s.resumeConnection() } } }
+    static func remove(_ id: String) { sessions.removeValue(forKey: id)?.disconnect() }
+    private var optimistic: [String: (thread: String, text: String, bubble: CodexChatMessage, baseline: Set<String>)] = [:]
+    private var selection = UUID()
+    @Published var device: CodexDevice
+    private var socket: URLSessionWebSocketTask?
+    private var receiveTask: Task<Void, Never>?
+    private var sendTask: Task<Void, Never>?
+    private var pending: [String: CheckedContinuation<[String: Any], Error>] = [:]
+    private var deadlines: [String: Task<Void, Never>] = [:]
+    private var ready: CheckedContinuation<Void, Error>?
+    private var readyTimeout: Task<Void, Never>?
+    private var key: SymmetricKey?
+    private var privateKey: Curve25519.KeyAgreement.PrivateKey?
+    private var sid = ""
+    private var sessionID = ""
+    private var generation = UUID()
+    private var sent = 0
+    private var received = 0
+    private var selectedThread: String?
+    private var turnID: String?
+    private var showingOlder = false
+    private var reconnectTask: Task<Void, Never>?
+    private var heartbeatTask: Task<Void, Never>?
+    private var connecting = false
+    private var wantsConnection = false
+
+    init(device: CodexDevice) { self.device = device }
+    deinit { reconnectTask?.cancel(); heartbeatTask?.cancel(); receiveTask?.cancel(); sendTask?.cancel(); readyTimeout?.cancel(); socket?.cancel(with: .goingAway, reason: nil) }
+    func connect() async {
+        guard !connecting else { return }
+        wantsConnection = true; connecting = true
+        defer { connecting = false }
+        reconnectTask?.cancel(); reconnectTask = nil
+        disconnectTransport(); error = nil; status = "正在连接…"
+        let attempt = generation
+        do {
+            let account = "codex.phone.identity.v1"
+            if let saved = KeychainStore.get(account: account), let data = Data(base64Encoded: saved) { privateKey = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data) }
+            else { let created = Curve25519.KeyAgreement.PrivateKey(); try KeychainStore.set(created.rawRepresentation.base64EncodedString(), account: account); privateKey = created }
+            guard let url = URL(string: device.relay.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/phone/" + device.hostId) else { throw CodexConnectError(message: "中转地址无效") }
+            sid = UUID().uuidString; sent = 0; received = 0
+            let ws = URLSession.shared.webSocketTask(with: url); ws.maximumMessageSize = 1024 * 1024; socket = ws
+            let current = generation
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                ready = continuation
+                readyTimeout = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(20))
+                    guard !Task.isCancelled, let self, self.generation == current else { return }
+                    self.fail("连接超时。请检查电脑连接程序和中转服务是否运行。")
+                }
+                ws.resume()
+                receiveTask = Task { [weak self] in
+                    do {
+                        while !Task.isCancelled {
+                            let frame = try await ws.receive()
+                            guard let self, self.generation == current else { return }
+                            let data: Data
+                            switch frame { case .data(let d): data = d; case .string(let s): data = Data(s.utf8); @unknown default: continue }
+                            try self.receive(data)
+                        }
+                    } catch { if let self, self.generation == current { self.fail("连接断开：\(error.localizedDescription)。请重连；未确认的消息不要重复发送。") } }
+                }
+            }
+            if let thread = selectedThread { await select(thread, activate: false) }
+            await checkCompletions(); startHeartbeat()
+        } catch { if generation == attempt { fail(error.localizedDescription) } }
+    }
+    func resumeConnection() async { guard wantsConnection else { return }; if !connected { await connect() } else { do { _ = try await request("ping"); await checkCompletions() } catch { fail(error.localizedDescription) } } }
+    private func startHeartbeat() {
+        heartbeatTask?.cancel()
+        heartbeatTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(20))
+                guard !Task.isCancelled, let self, self.connected else { return }
+                do { _ = try await self.request("ping"); await self.checkCompletions() } catch { if !Task.isCancelled { self.fail(error.localizedDescription) }; return }
+            }
+        }
+    }
+    func refreshActivity() async {
+        guard connected, !checkingActivity else { return }; checkingActivity = true; defer { checkingActivity = false }
+        do {
+            let result = try await request("activity")
+            unreadThreads = Set(result["unread"] as? [String] ?? [])
+            runningProjects = Set(result["runningProjects"] as? [String] ?? [])
+            unreadProjects = Set(result["unreadProjects"] as? [String] ?? [])
+            activeTasks = (result["tasks"] as? [[String: Any]] ?? []).compactMap { value in
+                guard let id = value["id"] as? String, let title = value["title"] as? String else { return nil }
+                let state = value["awaitingApproval"] as? Bool == true ? "等待确认" : "正在运行"
+                return CodexRow(id: id, title: title, path: (value["projectName"] as? String ?? "") + " · " + state)
+            }
+            activityLimited = result["limited"] as? Bool ?? false; activityError = nil
+        } catch { activityError = "任务状态暂不可用：" + error.localizedDescription }
+    }
+    func disconnect() {
+        wantsConnection = false; reconnectTask?.cancel(); reconnectTask = nil
+        disconnectTransport()
+    }
+    private func disconnectTransport() {
+        heartbeatTask?.cancel(); heartbeatTask = nil
+        generation = UUID(); receiveTask?.cancel(); sendTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil); socket = nil
+        key = nil; activeTasks = []; connected = false; writable = false; running = false; readyTimeout?.cancel()
+        let e = CodexConnectError(message: "连接已关闭")
+        ready?.resume(throwing: e); ready = nil
+        for c in pending.values { c.resume(throwing: e) }; pending.removeAll()
+        for task in deadlines.values { task.cancel() }; deadlines.removeAll()
+    }
+    private func fail(_ text: String) {
+        disconnectTransport(); status = wantsConnection ? "连接中断，正在自动重连…" : "未连接"; error = text
+        guard wantsConnection, reconnectTask == nil else { return }
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, let self, self.wantsConnection else { return }
+            self.reconnectTask = nil; await self.connect()
+        }
+    }
+    private func enqueue(_ value: [String: Any], encrypted: Bool) {
+        let before = sendTask, current = generation
+        sendTask = Task { [weak self] in
+            await before?.value
+            guard let self, self.generation == current, !Task.isCancelled else { return }
+            do {
+                let frame = encrypted ? ["type": "secure", "box": try self.seal(value)] as [String: Any] : value
+                guard let ws = self.socket else { throw CodexConnectError(message: "连接已关闭") }
+                try await ws.send(.data(JSONSerialization.data(withJSONObject: frame)))
+            } catch { if self.generation == current && !Task.isCancelled { self.fail(error.localizedDescription) } }
+        }
+    }
+    private func aad(_ direction: String, _ sequence: Int) -> Data { Data("\(device.hostId)|\(sessionID)|\(direction)|\(sequence)".utf8) }
+    private func seal(_ value: [String: Any]) throws -> [String: Any] {
+        guard let key else { throw CodexConnectError(message: "尚未完成连接验证") }; sent += 1
+        let box = try AES.GCM.seal(JSONSerialization.data(withJSONObject: value), using: key, authenticating: aad("c2h", sent))
+        return ["seq": sent, "nonce": Data(box.nonce).base64EncodedString(), "body": (box.ciphertext + box.tag).base64EncodedString()]
+    }
+    private func open(_ box: [String: Any]) throws -> [String: Any] {
+        guard let key, let seq = box["seq"] as? Int, seq == received + 1,
+              let n = box["nonce"] as? String, let nonce = Data(base64Encoded: n), nonce.count == 12,
+              let b = box["body"] as? String, let body = Data(base64Encoded: b), body.count >= 16, body.count < 900000 else { throw CodexConnectError(message: "消息校验失败，请重新连接") }
+        let sealed = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: nonce), ciphertext: body.dropLast(16), tag: body.suffix(16))
+        let data = try AES.GCM.open(sealed, using: key, authenticating: aad("h2c", seq))
+        guard let value = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw CodexConnectError(message: "消息格式无效") }
+        received = seq; return value
+    }
+    private func receive(_ data: Data) throws {
+        guard let frame = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        if frame["type"] as? String == "challenge" {
+            guard key == nil, let nonce = frame["nonce"] as? String, nonce.count == 43, let privateKey,
+                  let hostData = Data(codexBase64URL: device.hostKey) else { throw CodexConnectError(message: "电脑身份验证失败") }
+            sessionID = sid + "|" + nonce
+            let shared = try privateKey.sharedSecretFromKeyAgreement(with: Curve25519.KeyAgreement.PublicKey(rawRepresentation: hostData))
+            let salt = Data(SHA256.hash(data: Data((device.hostId + "|" + sessionID).utf8)))
+            key = shared.hkdfDerivedSymmetricKey(using: SHA256.self, salt: salt, sharedInfo: Data("ifile-connect-v1".utf8), outputByteCount: 32)
+            let hello = try seal(["pairToken": KeychainStore.get(account: "codex.pair." + device.id) ?? ""])
+            enqueue(["type": "hello", "sid": sid, "publicKey": privateKey.publicKey.rawRepresentation.codexBase64URL, "box": hello], encrypted: false)
+            return
+        }
+        if frame["type"] as? String == "rejected" { throw CodexConnectError(message: "配对失败或配对码已过期，请在电脑重新生成二维码。") }
+        guard let box = frame["box"] as? [String: Any] else { return }
+        let value = try open(box)
+        if let id = value["id"] as? String, let continuation = pending.removeValue(forKey: id) {
+            deadlines.removeValue(forKey: id)?.cancel()
+            if let error = value["error"] as? String { continuation.resume(throwing: CodexConnectError(message: error)) }
+            else { continuation.resume(returning: value["result"] as? [String: Any] ?? [:]) }
+            return
+        }
+        switch value["event"] as? String {
+        case "ready":
+            guard value["hostId"] as? String == device.id, value["protocolVersion"] as? Int == 1 else { throw CodexConnectError(message: "电脑协议不兼容") }
+            connected = true; status = "已连接 " + device.displayName
+            KeychainStore.delete(account: "codex.pair." + device.id); readyTimeout?.cancel(); ready?.resume(); ready = nil
+        case "timeline":
+            guard value["threadId"] as? String == selectedThread else { return }
+            if !showingOlder { merge(value["messages"] as? [[String: Any]] ?? []) }
+            running = value["status"] as? String == "active"; turnID = value["turnId"] as? String
+            if running { notice = nil }
+            if let model = value["model"] as? String { currentModel = model }
+            if let effort = value["reasoningEffort"] as? String { currentEffort = effort }
+            approvalNeeded = value["awaitingApproval"] as? Bool ?? false
+            questions = (value["questions"] as? [[String: Any]] ?? []).compactMap(CodexQuestionGroup.init)
+            let progress = value["progress"] as? [String: Any] ?? [:]
+            progressLabel = progress["label"] as? String ?? ""
+            progressSteps = (progress["steps"] as? [[String: Any]] ?? []).compactMap(CodexProgressStep.init)
+        case "history":
+            guard value["threadId"] as? String == selectedThread else { return }
+            if !showingOlder {
+                merge(value["messages"] as? [[String: Any]] ?? [], history: true)
+                olderCursor = value["nextCursor"] as? String
+            }
+        case "completed":
+            if let id = value["id"] as? String { completion(id) }
+        case "notice": error = value["message"] as? String
+        default: break
+        }
+    }
+    func request(_ method: String, _ params: [String: Any] = [:]) async throws -> [String: Any] {
+        guard connected else { throw CodexConnectError(message: "电脑未连接，请返回项目页重连") }
+        let id = UUID().uuidString
+        return try await withCheckedThrowingContinuation { continuation in
+            pending[id] = continuation
+            deadlines[id] = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(45))
+                guard !Task.isCancelled, let self, let c = self.pending.removeValue(forKey: id) else { return }
+                self.deadlines.removeValue(forKey: id)
+                c.resume(throwing: CodexConnectError(message: "请求超时。发送可能已到达电脑，请先刷新原对话确认。"))
+            }
+            enqueue(["id": id, "method": method, "params": params], encrypted: true)
+        }
+    }
+    private func merge(_ rows: [[String: Any]], history: Bool = false) {
+        for row in rows {
+            guard let id = row["id"] as? String, row["role"] as? String == "user", let text = row["text"] as? String else { continue }
+            for (key, p) in optimistic where p.thread == selectedThread && !p.baseline.contains(id) {
+                if row["clientMessageId"] as? String == key || text == p.text || (!p.text.isEmpty && text.hasPrefix(p.text + "\n")) {
+                    optimistic.removeValue(forKey: key); messages.removeAll { $0.id == key }
+                }
+            }
+        }
+        messages = CodexChatTimeline.merge(messages, rows.compactMap(CodexChatMessage.init), history: history)
+        for p in optimistic.values where p.thread == selectedThread && !messages.contains(where: { $0.id == p.bubble.id }) { messages.append(p.bubble) }
+        // At most 100 bubbles and 512 KB of text in the live screen.
+        while messages.count > 200 || messages.reduce(0, { $0 + $1.text.utf8.count }) > 512000 { messages.removeFirst() }
+    }
+    func select(_ threadID: String, activate: Bool = true) async {
+        selection = UUID(); let token = selection
+        writable = false
+        if !connected { await connect(); if selectedThread == threadID { return } }
+        running = false; notice = nil; questions = []; progressLabel = ""; progressSteps = []; currentModel = ""; currentEffort = ""; models = []; selectedThread = threadID; showingOlder = false; messages = []; olderCursor = nil; turnID = nil; approvalNeeded = false; error = nil
+        do {
+            let page = try await request("history", ["threadId": threadID])
+            guard selectedThread == threadID, selection == token else { return }
+            merge(page["messages"] as? [[String: Any]] ?? [], history: true); olderCursor = page["nextCursor"] as? String
+            var result = try await request("watch", ["threadId": threadID])
+            if activate && result["writable"] as? Bool != true {
+                status = "正在打开电脑原对话…"
+                _ = try await request("activate", ["threadId": threadID])
+                for _ in 0..<8 {
+                    try await Task.sleep(for: .seconds(1))
+                    guard selection == token else { return }
+                    result = try await request("watch", ["threadId": threadID])
+                    if result["writable"] as? Bool == true { break }
+                }
+            }
+            guard selection == token else { return }
+            writable = result["writable"] as? Bool ?? false; status = result["message"] as? String ?? "已连接"
+        } catch { self.error = error.localizedDescription }
+    }
+    func leaveChat(_ expectedID: String? = nil) { if let expectedID, selectedThread != expectedID { return }; let leaving = selectedThread; selection = UUID(); selectedThread = nil; messages = []; olderCursor = nil; writable = false; running = false; Task { if let leaving { _ = try? await request("unwatch", ["threadId": leaving]) } } }
+    func older(_ threadID: String) async {
+        guard let cursor = olderCursor else { return }
+        showingOlder = true
+        do {
+            let page = try await request("history", ["threadId": threadID, "cursor": cursor])
+            guard selectedThread == threadID else { return }
+            // Older pages replace the viewport to keep phone memory bounded. Latest returns to live view.
+            messages = []; merge(page["messages"] as? [[String: Any]] ?? [], history: true); olderCursor = page["nextCursor"] as? String
+        } catch { self.error = error.localizedDescription }
+    }
+    func showOutgoing(_ text: String, to threadID: String, messageID: String, names: [String] = []) {
+        guard optimistic[messageID] == nil else { return }
+        let display = ([text] + names.map { "📎 " + $0 }).filter { !$0.isEmpty }.joined(separator: "\n")
+        let bubble = CodexChatMessage(id: messageID, text: display, delivery: "正在发送…")
+        optimistic[messageID] = (threadID, text.isEmpty ? "请查看附件" : text, bubble, Set(messages.map(\.id)))
+        messages.append(bubble)
+    }
+    func send(_ text: String, to threadID: String, messageID: String, attachments: [String] = []) async throws {
+        showOutgoing(text, to: threadID, messageID: messageID)
+        do {
+            let result = try await request("send", ["threadId": threadID, "text": text, "messageId": messageID, "attachments": attachments])
+            guard result["state"] as? String == "accepted" else { throw CodexConnectError(message: result["error"] as? String ?? "未确认送达，请刷新对话核实。") }
+            updateDelivery(messageID, "已送达"); running = true
+        } catch { updateDelivery(messageID, "送达待确认"); throw error }
+    }
+    func updateDelivery(_ id: String, _ state: String) {
+        if var p = optimistic[id] { p.bubble.delivery = state; optimistic[id] = p }
+        if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].delivery = state }
+    }
+    func dismissOutgoing(_ id: String) { optimistic.removeValue(forKey: id); messages.removeAll { $0.id == id } }
+    private func completion(_ id: String) { if !running { notice = "Codex 处理完成" }; CodexNotifications.shared.completed(id: id, host: device.displayName) }
+    private func checkCompletions() async { if let r = try? await request("completions"), let items = r["items"] as? [[String: Any]] { for item in items { if let id = item["id"] as? String { completion(id) } } } }
+    func upload(_ url: URL, threadID: String) async throws -> String {
+        uploadProgress = 0; defer { uploadProgress = nil }
+        let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
+        var hash = SHA256(), size = 0
+        while let data = try file.read(upToCount: 192 * 1024), !data.isEmpty { size += data.count; guard size <= 25 * 1024 * 1024 else { throw CodexConnectError(message: "单个附件上限 25 MB") }; hash.update(data: data) }
+        let digest = hash.finalize().map { String(format: "%02x", $0) }.joined()
+        let r = try await request("uploadBegin", ["threadId": threadID, "name": url.lastPathComponent, "size": size, "sha256": digest])
+        guard let id = r["id"] as? String else { throw CodexConnectError(message: "上传初始化失败") }
+        do {
+            try file.seek(toOffset: 0); var offset = 0
+            while let data = try file.read(upToCount: 192 * 1024), !data.isEmpty {
+                try Task.checkCancellation()
+                let ack = try await request("uploadChunk", ["id": id, "offset": offset, "data": data.base64EncodedString()])
+                offset += data.count
+                guard ack["offset"] as? Int == offset else { throw CodexConnectError(message: "附件分块确认失败") }
+                uploadProgress = Double(offset) / Double(max(1, size))
+            }
+            _ = try await request("uploadFinish", ["id": id]); return id
+        } catch { _ = try? await request("uploadCancel", ["id": id]); throw error }
+    }
+    func markRead(_ threadID: String) async {
+        guard unreadThreads.contains(threadID) else { return }
+        if (try? await request("markRead", ["threadId": threadID])) != nil { unreadThreads.remove(threadID) }
+    }
+    func refreshModels(_ threadID: String) async {
+        do {
+            let result = try await request("models", ["threadId": threadID])
+            guard selectedThread == threadID else { return }
+            let current = result["current"] as? [String: Any] ?? [:]
+            currentModel = current["model"] as? String ?? ""; currentEffort = current["reasoningEffort"] as? String ?? ""
+            models = (result["models"] as? [[String: Any]] ?? []).compactMap { m in guard let id = m["id"] as? String else { return nil }; return CodexRow(id: id, title: m["name"] as? String ?? id) }
+        } catch { self.error = error.localizedDescription }
+    }
+    func chooseModel(_ model: String, threadID: String) async throws {
+        let result = try await request("setModel", ["threadId": threadID, "model": model])
+        guard selectedThread == threadID else { return }
+        let current = result["current"] as? [String: Any] ?? [:]
+        currentModel = current["model"] as? String ?? model; currentEffort = current["reasoningEffort"] as? String ?? ""
+    }
+    func stop(_ threadID: String) async { do { _ = try await request("stop", ["threadId": threadID, "turnId": turnID ?? ""]) } catch { self.error = error.localizedDescription } }
+    func download(projectID: String, path: String, absolute: Bool = false, preview: Bool = false) async throws -> URL {
+        guard downloadTask == nil else { throw CodexConnectError(message: "已有文件正在下载，请等待完成或取消后重试") }
+        downloadState = CodexDownloadState(name: path.replacingOccurrences(of: "\\", with: "/").components(separatedBy: "/").last ?? "文件", preview: preview)
+        downloadProgress = 0
+        let task = Task { try await self.performDownload(projectID: projectID, path: path, absolute: absolute, preview: preview) }
+        downloadTask = task
+        defer { downloadTask = nil; downloadProgress = nil }
+        do {
+            let url = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            downloadState?.file = url; downloadState?.name = url.lastPathComponent; downloadState?.phase = .saved
+            return url
+        } catch {
+            if error is CancellationError || task.isCancelled { downloadState?.phase = .cancelled; throw CancellationError() }
+            downloadState?.phase = .failed; downloadState?.error = error.localizedDescription; throw error
+        }
+    }
+    func cancelDownload() { downloadTask?.cancel(); if downloadTask != nil { downloadState?.phase = .cancelling } }
+    func dismissDownload() { if downloadState?.active != true { downloadState = nil } }
+    private func performDownload(projectID: String, path: String, absolute: Bool, preview: Bool) async throws -> URL {
+        try Task.checkCancellation()
+        let info = try await request("filePrepare", ["projectId": projectID, absolute ? "absolutePath" : "relativePath": path])
+        guard let id = info["id"] as? String, let size = info["size"] as? Int, size >= 0, size <= 200 * 1024 * 1024,
+              let name = info["name"] as? String, let expected = info["sha256"] as? String else { throw CodexConnectError(message: "文件信息无效") }
+        defer { Task { _ = try? await request("fileRelease", ["fileId": id]) } }
+        try Task.checkCancellation()
+        downloadState?.name = name; downloadState?.total = size; downloadState?.phase = .receiving
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        FileManager.default.createFile(atPath: temp.path, contents: nil)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        let file = try FileHandle(forWritingTo: temp); defer { try? file.close() }
+        var offset = 0; var hash = SHA256()
+        while offset < size {
+            try Task.checkCancellation()
+            let chunk = try await request("fileChunk", ["fileId": id, "offset": offset])
+            guard chunk["offset"] as? Int == offset, let encoded = chunk["data"] as? String, let bytes = Data(base64Encoded: encoded), !bytes.isEmpty, bytes.count <= 192 * 1024, offset + bytes.count <= size else { throw CodexConnectError(message: "文件分块校验失败") }
+            try Task.checkCancellation()
+            try file.write(contentsOf: bytes); hash.update(data: bytes); offset += bytes.count; downloadProgress = Double(offset) / Double(max(1, size)); downloadState?.received = offset
+        }
+        try Task.checkCancellation()
+        downloadState?.phase = .verifying
+        guard hash.finalize().map({ String(format: "%02x", $0) }).joined() == expected else { throw CodexConnectError(message: "文件完整性校验失败，请重新下载") }
+        try file.close()
+        let safeName = URL(fileURLWithPath: name).lastPathComponent
+        guard !safeName.isEmpty, safeName != ".", safeName != ".." else { throw CodexConnectError(message: "文件名无效") }
+        let folder = preview ? FileManager.default.temporaryDirectory.appendingPathComponent("codex-preview-" + UUID().uuidString, isDirectory: true) : LocalFileService.documentsDirectory.appendingPathComponent("Codex 下载", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var target = folder.appendingPathComponent(safeName)
+        if FileManager.default.fileExists(atPath: target.path) { target = folder.appendingPathComponent(String(UUID().uuidString.prefix(8)) + "-" + safeName) }
+        try Task.checkCancellation()
+        try FileManager.default.moveItem(at: temp, to: target)
+        if !preview { NotificationCenter.default.post(name: Notification.Name("iFileDocumentsChanged"), object: nil) }
+        return target
+    }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "我的电脑",
+  "relay": "wss://codex.example.com",
+  "codexExecutable": "C:/path/to/desktop/resources/codex.exe",
+  "codexHome": "C:/Users/your-name/.codex",
+  "desktopCatalog": true,
+  "projects": ["D:/Projects/my-project"]
+}

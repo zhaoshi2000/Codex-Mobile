@@ -1,0 +1,28 @@
+# Signing secrets — never commit these
+Signing/*.p12
+Signing/*密码*.txt
+Signing/*.txt
+Signing/*.mobileprovision
+Signing/*.key
+Signing/*.pem
+
+# Xcode build products
+Build/
+build/
+DerivedData/
+*.xcarchive
+*.ipa
+*.dSYM
+
+# macOS
+.DS_Store
+
+*.p8
+*.p12
+*.mobileprovision
+*.pem
+*.key
+relay.token
+device.json
+connection-status.json
+Runtime/

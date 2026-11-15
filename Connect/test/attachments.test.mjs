@@ -1,0 +1,54 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { Gateway } from '../src/gateway.mjs';
+import { messages } from '../src/timeline.mjs';
+
+test('attachment transfer verifies hashes, scope and owner, and sends typed inputs once', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ifile-upload-test-'));
+  const root = path.join(dir, 'project'); await fs.mkdir(root);
+  const ipc = new EventEmitter(); ipc.owner = async () => 'desktop'; ipc.follow = () => {};
+  let sent; ipc.send = async (...args) => { sent = args; };
+  const rpc = { call: async () => ({ thread: { cwd: root } }) };
+  const g = new Gateway({ rpc, ipc, roots: [root], stateDir: dir }); await g.init();
+  t.after(async () => { await g.close(); await fs.rm(dir, { recursive: true, force: true }); });
+  const peer = { id: 'phone', publicKey: 'key', emit() {} }, threadId = 'thread_1234567';
+  const bytes = Buffer.from('测试附件\n');
+  const params = { threadId, name: 'report.unknown', size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  await assert.rejects(g.handle('uploadBegin', { ...params, name: '../escape' }, peer));
+  await assert.rejects(g.handle('uploadBegin', { ...params, size: 26 * 1024 * 1024 }, peer));
+  const { id } = await g.handle('uploadBegin', params, peer);
+  await assert.rejects(g.handle('uploadChunk', { id, offset: 0, data: bytes.toString('base64') }, { publicKey: 'other' }));
+  await assert.rejects(g.handle('uploadChunk', { id, offset: 1, data: bytes.toString('base64') }, peer));
+  await g.handle('uploadChunk', { id, offset: 0, data: bytes.toString('base64') }, peer);
+  await g.handle('uploadFinish', { id }, peer);
+  const p = { threadId, messageId: randomUUID(), text: '读取附件', attachments: [id] };
+  await assert.rejects(g.handle('send', { ...p, threadId: 'thread_other1234' }, peer));
+  await assert.rejects(g.handle('send', p, { publicKey: 'other' }));
+  assert.equal((await g.handle('send', p, peer)).state, 'accepted');
+  assert.deepEqual(await fs.readFile(sent[3][0].path), bytes);
+  const lease = await g.handle('filePrepare', { projectId: '0', absolutePath: sent[3][0].path }, peer);
+  assert.equal(lease.sha256, params.sha256);
+  await assert.rejects(g.handle('filePrepare', { projectId: '0', absolutePath: path.join(dir, 'operations.json') }, peer));
+  const bad = await g.handle('uploadBegin', { ...params, sha256: '0'.repeat(64) }, peer);
+  await g.handle('uploadChunk', { id: bad.id, offset: 0, data: bytes.toString('base64') }, peer);
+  await assert.rejects(g.handle('uploadFinish', bad, peer));
+  assert.equal(g.uploads.active.size, 0);
+  await g.handle('watch', { threadId }, peer);
+  g.onBroadcast({ method: 'thread-stream-state-changed', version: 13, params: { conversationId: threadId, change: { type: 'snapshot', revision: 1, conversationState: { turns: [{id:'turn',status:'inProgress'}], threadRuntimeStatus: {type:'active'} } } } });
+  await new Promise(r => setTimeout(r, 300));
+  g.unwatch(peer.id);
+  g.onBroadcast({ method: 'thread-stream-state-changed', version: 13, params: { conversationId: threadId, change: { type: 'snapshot', revision: 2, conversationState: { turns: [], threadRuntimeStatus: {type:'idle'} } } } });
+  await new Promise(r => setTimeout(r, 300));
+  assert.equal((await g.handle('completions', {}, peer)).items[0].id, p.messageId);
+  assert.deepEqual((await g.handle('completions', {}, {publicKey:'other'})).items, []);
+});
+
+test('history preserves attachment references without embedding image bytes', () => {
+  const rows = messages([{ id:'turn', items: [{ id:'user', type:'userMessage', content:[{type:'text',text:'图片'}, {type:'localImage',path:'D:/项目/photo.jpg'}, {type:'mention',name:'说明.md',path:'D:/项目/说明.md'}] }] }]);
+  assert.match(rows[0].text, /photo.jpg/); assert.match(rows[0].text, /说明.md/);
+});

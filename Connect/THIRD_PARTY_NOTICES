@@ -1,0 +1,5 @@
+iFile+ Connect's desktop protocol research references Remodex:
+https://github.com/Emanuele-web04/remodex
+Copyright Remodex contributors. Licensed under Apache License 2.0.
+The initial adapter implementation is original; no bundled Codex desktop source is distributed.
+Runtime dependencies retain their own package licenses (ws: MIT; qrcode: MIT).
