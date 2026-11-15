@@ -738,9 +738,14 @@ export class Gateway {
       const state = this.codexHome ? await readJSON(path.join(this.codexHome, ".codex-global-state.json"), {}) : {};
       rows = state["queued-follow-ups"]?.[threadId] || [];
     }
-    return rows.slice(0, 50).map(m => ({ id: m.id, text: String(m.text || m.context?.prompt || "附件消息").slice(0, 32000),
-      editable: this.ledger[m.id]?.owner === peer.publicKey && !this.ledger[m.id]?.queueAction,
-      preparing: !!m.preparation, error: m.pausedReason || null }));
+    return rows.filter(m => !this.ledger[m.id]?.queueAction).slice(0, 50).map(m => {
+      const record = this.ledger[m.id];
+      const text = String(m.text || m.context?.prompt || "附件消息").slice(0, 32000);
+      const own = record?.owner === peer.publicKey;
+      const links = own ? (record.attachments || []).slice(0, 6).map(a => `📎 [${String(a.name || path.basename(a.path)).replace(/[\[\]\n]/g, "")}](<${a.path}>)`) : [];
+      return { id: m.id, text, displayText: [text, ...links].join("\n"), editable: own,
+        preparing: !!m.preparation, error: m.pausedReason || null };
+    });
   }
   onBroadcast(m) {
     if (m.method === "thread-queued-followups-changed" && m.version === 3) {

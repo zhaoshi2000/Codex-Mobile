@@ -115,12 +115,14 @@ enum CodexChatTimeline {
 struct CodexQueuedMessage: Identifiable {
     let id: String
     let text: String
+    let displayText: String
     let editable: Bool
     let preparing: Bool
     let error: String?
     init?(_ json: [String: Any]) {
         guard let id = json["id"] as? String else { return nil }
         self.id = id; text = json["text"] as? String ?? "附件消息"
+        displayText = json["displayText"] as? String ?? text
         editable = json["editable"] as? Bool ?? false; preparing = json["preparing"] as? Bool ?? false; error = json["error"] as? String
     }
 }

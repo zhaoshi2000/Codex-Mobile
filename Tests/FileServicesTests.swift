@@ -224,6 +224,19 @@ final class FileServicesTests: XCTestCase {
         XCTAssertEqual(afterOtherDevice, 2)
     }
 
+    func testSteeredPhotoStaysVisibleAcrossRefreshUntilCanonicalMessageReplacesIt() {
+        let queued = CodexQueuedMessage(["id": "steer-id", "text": "补充", "displayText": "补充\n📎 [照片](<C:/photo.jpg>)"])!
+        let outgoing = CodexChatMessage(id: queued.id, text: queued.displayText, delivery: "正在引导…")
+        let older = chat("older", "previous reply")
+        let waiting = CodexChatTimeline.merge([older, outgoing], [older], history: true)
+        XCTAssertEqual(waiting.last?.id, queued.id)
+        XCTAssertEqual(CodexMessageImages(waiting.last!.text).paths, ["C:/photo.jpg"])
+        let canonical = CodexChatMessage(["id": "native-user", "role": "user", "text": queued.displayText, "clientMessageId": queued.id])!
+        let confirmed = CodexChatTimeline.merge(waiting, [older, canonical], history: true)
+        XCTAssertEqual(confirmed.filter { $0.role == "user" }.count, 1)
+        XCTAssertEqual(confirmed.last?.id, "native-user")
+    }
+
 }
 
 private actor ThumbnailLoadCounter {

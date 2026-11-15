@@ -355,13 +355,26 @@ struct CodexImageStack: View {
             ZStack(alignment: .leading) {
                 ForEach(Array((0..<visibleCount).reversed()), id: \.self) { offset in
                     let path = paths[(index + offset) % paths.count]
-                    Button { if offset == 0 { open(path) } else { selected = (index + offset) % paths.count } } label: {
-                        CodexImageThumbnail(service: service, threadID: threadID, path: path)
+                    CodexImageThumbnail(service: service, threadID: threadID, path: path)
                             .frame(width: 112, height: 112).clipped()
                             .background(Color(.secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(.background, lineWidth: 2))
-                    }.buttonStyle(.plain)
+                        .contentShape(RoundedRectangle(cornerRadius: 12))
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 20).exclusively(before: TapGesture())
+                                .onEnded { gesture in
+                                    switch gesture {
+                                    case .first(let drag):
+                                        guard paths.count > 1, abs(drag.translation.width) > abs(drag.translation.height) * 1.3 else { return }
+                                        withAnimation(.easeInOut(duration: 0.18)) { selected = (index + (drag.translation.width < 0 ? 1 : paths.count - 1)) % paths.count }
+                                    case .second:
+                                        if offset == 0 { open(path) } else { selected = (index + offset) % paths.count }
+                                    }
+                                }
+                        )
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction { if offset == 0 { open(path) } else { selected = (index + offset) % paths.count } }
                         .rotationEffect(.degrees(Double(offset * 5)))
                         .offset(x: CGFloat(offset * 18))
                         .zIndex(Double(3 - offset))
@@ -369,10 +382,6 @@ struct CodexImageStack: View {
                 }
             }.frame(width: 112 + CGFloat(max(0, visibleCount - 1) * 18) + 12, height: 126, alignment: .leading)
                 .contentShape(Rectangle())
-                .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { value in
-                    guard paths.count > 1, abs(value.translation.width) > abs(value.translation.height) * 1.3 else { return }
-                    withAnimation(.easeInOut(duration: 0.18)) { selected = (index + (value.translation.width < 0 ? 1 : paths.count - 1)) % paths.count }
-                })
                 .accessibilityAdjustableAction { direction in
                     guard !paths.isEmpty else { return }
                     selected = (index + (direction == .increment ? 1 : paths.count - 1)) % paths.count

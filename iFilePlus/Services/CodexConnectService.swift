@@ -81,6 +81,7 @@ extension Data {
     @Published var error: String?
     @Published var queuedMessages: [CodexQueuedMessage] = []
     private let imageCache = NSCache<NSString, UIImage>()
+    private var steeringMessages: Set<String> = []
     private var uploadedPaths: [String: String] = [:]
     @Published var messages: [CodexChatMessage] = []
     @Published var threadTitles: [String: String] = [:]
@@ -299,7 +300,7 @@ extension Data {
             if let id = value["threadId"] as? String, let title = value["title"] as? String { threadTitles[id] = title }
         case "queued":
             guard value["threadId"] as? String == selectedThread else { return }
-            queuedMessages = (value["messages"] as? [[String: Any]] ?? []).compactMap(CodexQueuedMessage.init)
+            queuedMessages = (value["messages"] as? [[String: Any]] ?? []).compactMap(CodexQueuedMessage.init).filter { !steeringMessages.contains($0.id) }
         case "history":
             guard value["threadId"] as? String == selectedThread else { return }
             if !showingOlder {
@@ -404,13 +405,31 @@ extension Data {
         } catch { updateDelivery(messageID, "送达待确认"); throw error }
     }
     func refreshQueue(_ threadID: String) async {
-        do { let result = try await request("queued", ["threadId": threadID]); if selectedThread == threadID { queuedMessages = (result["messages"] as? [[String: Any]] ?? []).compactMap(CodexQueuedMessage.init) } }
+        do { let result = try await request("queued", ["threadId": threadID]); if selectedThread == threadID { queuedMessages = (result["messages"] as? [[String: Any]] ?? []).compactMap(CodexQueuedMessage.init).filter { !steeringMessages.contains($0.id) } } }
         catch { self.error = error.localizedDescription }
     }
     func changeQueued(_ messageID: String, threadID: String, steer: Bool) async throws {
-        let result = try await request(steer ? "steerQueued" : "removeQueued", ["threadId": threadID, "messageId": messageID])
-        await refreshQueue(threadID)
-        guard result["state"] as? String == "accepted" else { throw CodexConnectError(message: result["error"] as? String ?? "送达待确认，请查看电脑原对话") }
+        if steer { steeringMessages.insert(messageID) }
+        defer { steeringMessages.remove(messageID) }
+        if steer, let message = queuedMessages.first(where: { $0.id == messageID }), selectedThread == threadID {
+            showOutgoing(message.text, to: threadID, messageID: messageID, displayText: message.displayText)
+            updateDelivery(messageID, "正在引导…")
+            queuedMessages.removeAll { $0.id == messageID }
+        }
+        do {
+            let result = try await request(steer ? "steerQueued" : "removeQueued", ["threadId": threadID, "messageId": messageID])
+            guard result["state"] as? String == "accepted" else { throw CodexConnectError(message: result["error"] as? String ?? "送达待确认，请查看电脑原对话") }
+            if steer { updateDelivery(messageID, "已引导，等待电脑同步") }
+            await refreshQueue(threadID)
+            if steer, selectedThread == threadID,
+               let page = try? await request("history", ["threadId": threadID]), selectedThread == threadID {
+                merge(page["messages"] as? [[String: Any]] ?? [], history: true)
+            }
+        } catch {
+            if steer { updateDelivery(messageID, "引导送达待确认") }
+            await refreshQueue(threadID)
+            throw error
+        }
     }
     private func thumbnailKey(_ path: String, threadID: String) -> String { device.hostKey + "\n" + threadID + "\n" + path }
     func cachedThumbnail(_ path: String, threadID: String) -> UIImage? { imageCache.object(forKey: thumbnailKey(path, threadID: threadID) as NSString) }

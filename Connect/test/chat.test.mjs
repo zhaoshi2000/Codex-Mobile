@@ -66,3 +66,12 @@ test('rename uses native thread name, rejects invalid titles, and reports failur
   for(const title of ['', 'x'.repeat(121), 'a\nb'])await assert.rejects(g.handle('renameThread',{threadId:id,title},peer));
   await assert.rejects(g.handle('renameThread',{threadId:id,title:'reject'},peer));assert.equal(events.length,1);
 });
+
+test('queued steering display preserves attachment links and hides stale queue rows after dispatch',async t=>{
+ const {g,peer,id}=await fixture(t);const mid=randomUUID();
+ g.ledger[mid]={owner:peer.publicKey,text:'follow up',attachments:[{name:'photo.jpg',path:'C:/project/photo.jpg',image:true}]};
+ g.queued.set(id,[{id:mid,text:'follow up'}]);
+ const row=(await g.queueRows(id,peer))[0];assert.equal(row.displayText,'follow up\n📎 [photo.jpg](<C:/project/photo.jpg>)');assert.equal(row.editable,true);
+ const other=(await g.queueRows(id,{publicKey:'another'}))[0];assert.equal(other.displayText,'follow up');assert.equal(other.editable,false);
+ g.ledger[mid].queueAction='steerQueued';assert.deepEqual(await g.queueRows(id,peer),[]);
+});
