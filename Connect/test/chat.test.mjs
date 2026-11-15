@@ -51,6 +51,7 @@ test('queued completion follows its actual turn, not the preceding task, and sur
  const{g,ipc,peer,id}=await fixture(t);ipc.queue=async()=>{};g.states.set(id,{state:{threadRuntimeStatus:{type:'active'}}});
  g.monitors.set(id,{messageId:'previous',active:true});const messageId=randomUUID();await g.handle('send',{threadId:id,messageId,text:'later'},peer);
  assert.equal(g.monitors.get(id).messageId,'previous');assert.ok(g.pendingQueued.get(id).has(messageId));
+ g.monitors.clear();g.subscribers.set(peer.id,{threadId:id,peer});g.unwatch(peer.id);assert.ok(g.states.has(id));
  await g.completeQueuedTurns(id,[{id:'previous-turn',status:'completed',items:[]}]);assert.equal(g.ledger[messageId].completedAt,undefined);
  await g.completeQueuedTurns(id,[{id:'later-turn',status:'inProgress',params:{clientUserMessageId:messageId}}]);assert.equal(g.ledger[messageId].startedTurnId,'later-turn');
  await g.completeQueuedTurns(id,[{id:'later-turn',status:'completed',items:[]}]);assert.ok(g.ledger[messageId].completedAt);assert.equal(g.pendingQueued.has(id),false);

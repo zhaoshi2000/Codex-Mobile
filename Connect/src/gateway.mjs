@@ -56,7 +56,6 @@ export class Gateway {
       if (record.mode === "queued" && !record.queueAction && !record.completedAt && Date.now() - record.at < 86400000) {
         if (!this.pendingQueued.has(record.threadId)) this.pendingQueued.set(record.threadId, new Set());
         this.pendingQueued.get(record.threadId).add(id);
-        this.ipc.follow(record.threadId);
       }
     }
     this.navigation = await readJSON(path.join(this.stateDir, "navigation.json"), { peers: {}, completed: {} });
@@ -64,6 +63,7 @@ export class Gateway {
     this.completedThreadProjects = this.navigation.projects ||= {};
     this.ipc.on("broadcast", (m) => this.onBroadcast(m));
     this.ipc.on("closed", () => { this.states.clear(); this.queued.clear(); for (const s of this.subscribers.values()) s.peer.emit?.({ event: "notice", message: "电脑通道重连中，请等待状态恢复" }); });
+    for (const id of this.pendingQueued.keys()) this.ipc.follow(id);
     this.leaseTimer = setInterval(
       () => this.cleanLeases().catch(() => {}),
       60000,
@@ -692,7 +692,7 @@ export class Gateway {
     const sub = this.subscribers.get(peerId);
     this.subscribers.delete(peerId);
     if (
-      sub && !this.monitors.has(sub.threadId) &&
+      sub && !this.pendingQueued.has(sub.threadId) && !this.monitors.has(sub.threadId) &&
       ![...this.subscribers.values()].some((s) => s.threadId === sub.threadId)
     ) {
       try {
