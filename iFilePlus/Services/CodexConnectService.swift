@@ -384,7 +384,8 @@ extension Data {
         } catch { self.error = error.localizedDescription }
     }
     func showOutgoing(_ text: String, to threadID: String, messageID: String, names: [String] = [], displayText: String? = nil) {
-        guard optimistic[messageID] == nil else { return }
+        guard optimistic[messageID] == nil,
+              !messages.contains(where: { !$0.provisional && ($0.id == messageID || $0.clientMessageID == messageID) }) else { return }
         let display = displayText ?? ([text] + names.map { "📎 " + $0 }).filter { !$0.isEmpty }.joined(separator: "\n")
         let bubble = CodexChatMessage(id: messageID, text: display, delivery: "正在发送…")
         optimistic[messageID] = (threadID, text.isEmpty ? "请查看附件" : text, bubble, Set(messages.map(\.id)))
@@ -426,8 +427,9 @@ extension Data {
                 merge(page["messages"] as? [[String: Any]] ?? [], history: true)
             }
         } catch {
-            if steer { updateDelivery(messageID, "引导送达待确认") }
+            if steer { steeringMessages.remove(messageID); updateDelivery(messageID, "引导送达待确认") }
             await refreshQueue(threadID)
+            if steer, queuedMessages.contains(where: { $0.id == messageID }) { dismissOutgoing(messageID) }
             throw error
         }
     }
