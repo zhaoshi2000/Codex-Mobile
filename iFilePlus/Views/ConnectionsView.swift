@@ -21,14 +21,8 @@ struct ConnectionsView: View {
                             NavigationLink { RemoteBrowserView(connection: connection) } label: { serverLabel(connection) }
                                 .contextMenu { actions(connection) }
                         } else {
-                            VStack(alignment: .leading, spacing: 12) {
-                                serverLabel(connection)
-                                HStack(spacing: 24) {
-                                    NavigationLink { SSHTerminalView(connection: connection) } label: { Label("SSH", systemImage: "terminal") }
-                                    NavigationLink { ServerAIView(connection: connection) } label: { Label("AI", systemImage: "sparkles") }
-                                    NavigationLink { OpenClawView(connection: connection) } label: { Label(connection.chatAlias, systemImage: "bubble.left.and.bubble.right") }
-                                }.font(.subheadline).buttonStyle(.borderless)
-                            }.padding(.vertical, 4).contextMenu { actions(connection) }
+                            NavigationLink { SSHTerminalView(connection: connection) } label: { serverLabel(connection) }
+                                .contextMenu { actions(connection) }
                         }
                     }
                 }
