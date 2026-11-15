@@ -254,8 +254,6 @@ struct CodexDeleteChat: ViewModifier {
     @ObservedObject var service: CodexConnectService
     let thread: CodexRow
     let onDeleted: () async -> Void
-    var pinLabel: String? = nil
-    var pinAction: (() -> Void)? = nil
     @State private var renaming = false
     @State private var newTitle = ""
     @State private var confirming = false
@@ -269,7 +267,6 @@ struct CodexDeleteChat: ViewModifier {
             }
             .contextMenu {
                 Button("重命名", systemImage: "pencil") { newTitle = service.title(for: thread); renaming = true }.disabled(deleting || !service.connected)
-                if let pinLabel, let pinAction { Button(pinLabel, systemImage: "pin", action: pinAction) }
                 Button("删除对话", systemImage: "trash", role: .destructive) { confirming = true }.disabled(deleting || !service.connected)
             }
             .alert("重命名对话", isPresented: $renaming) {
@@ -498,7 +495,7 @@ private struct CodexChatContent: View {
                             returnToDevice()
                         }
                     )
-                    .frame(width: min(380, geometry.size.width * 0.86))
+                    .frame(width: min(300, geometry.size.width * 0.74))
                     .frame(maxHeight: .infinity)
                     .background(Color(uiColor: .systemGroupedBackground))
                     .shadow(color: .black.opacity(0.16), radius: 12, x: 4)

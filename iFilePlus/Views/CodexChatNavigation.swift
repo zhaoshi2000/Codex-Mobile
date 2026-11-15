@@ -201,7 +201,6 @@ struct CodexChatNavigation: View {
     let select: (CodexRow) -> Void
     let exit: () -> Void
     @State private var projects: [CodexRow] = []
-    @State private var pinned: [CodexRow] = []
     @State private var recent: [CodexRow] = []
     @State private var expanded: Set<String> = []
     @State private var projectsExpanded = false
@@ -226,10 +225,6 @@ struct CodexChatNavigation: View {
             .padding(.horizontal, 16)
             List {
                 Section { Button("返回设备列表", systemImage: "desktopcomputer") { exit() } }
-                Section("置顶对话") {
-                    ForEach(pinned) { thread in threadRow(thread) }
-                    if pinned.isEmpty { Text("长按对话可置顶").font(.caption).foregroundStyle(.secondary) }
-                }
                 Section {
                     DisclosureGroup(isExpanded: $projectsExpanded) {
                     ForEach(projects) { project in
@@ -272,10 +267,7 @@ struct CodexChatNavigation: View {
                 else if service.unreadThreads.contains(thread.id) { Circle().fill(.blue).frame(width: 8, height: 8).accessibilityLabel("完成未读") }
             }
         }
-        .modifier(CodexDeleteChat(service: service, thread: thread, onDeleted: { await load() },
-                                  pinLabel: pinned.contains(where: { $0.id == thread.id }) ? "取消置顶" : "置顶对话",
-                                  pinAction: { Task { await pin(thread) } }))
-        .swipeActions(edge: .leading) { Button("置顶", systemImage: "pin") { Task { await pin(thread) } }.tint(.orange) }
+        .modifier(CodexDeleteChat(service: service, thread: thread, onDeleted: { await load() }))
     }
     @ViewBuilder private func projectBadge(_ id: String) -> some View {
         if service.runningProjects.contains(id) { Circle().fill(.green).frame(width: 8, height: 8).accessibilityLabel("项目有任务正在运行") }
@@ -288,7 +280,6 @@ struct CodexChatNavigation: View {
         do {
             let data = try await service.request("navigation")
             projects = (data["projects"] as? [[String: Any]] ?? []).compactMap { x in guard let id = x["id"] as? String else { return nil }; return CodexRow(id: id, title: x["name"] as? String ?? "项目") }
-            pinned = (data["pinned"] as? [[String: Any]] ?? []).compactMap { x in guard let id = x["id"] as? String else { return nil }; return CodexRow(id: id, title: x["title"] as? String ?? "对话") }
             service.unreadThreads = Set(data["unread"] as? [String] ?? [])
             await loadRecent()
             for id in expanded { await loadProject(id) }
@@ -312,11 +303,7 @@ struct CodexChatNavigation: View {
             projectCursors[id] = result["nextCursor"] as? String
         } catch { self.error = error.localizedDescription }
     }
-    private func pin(_ thread: CodexRow) async {
-        do {
-            _ = try await service.request("pinThread", ["threadId": thread.id, "pinned": !pinned.contains(where: { $0.id == thread.id })]); await load()
-        } catch { self.error = error.localizedDescription }
-    }
+
 }
 
 
