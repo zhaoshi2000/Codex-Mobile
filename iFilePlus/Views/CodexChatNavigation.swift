@@ -3,7 +3,6 @@ import QuickLook
 
 struct CodexDownloadCard: View {
     @ObservedObject var service: CodexConnectService
-    @State private var preview: CodexPreviewFile?
     var body: some View {
         if let state = service.downloadState, !state.preview || state.active {
             VStack(alignment: .leading, spacing: 6) {
@@ -23,17 +22,11 @@ struct CodexDownloadCard: View {
                     }
                 } else if state.phase == .saved, let file = state.file {
                     Text("已保存到：文件 → Codex 下载").font(.caption).foregroundStyle(.secondary)
-                    IPAFileActions(url: file).font(.subheadline)
-                    HStack(spacing: 24) {
-                        Button("打开文件", systemImage: "doc") { preview = CodexPreviewFile(url: file) }
-                        ShareLink(item: file) { Label("分享 / 导出", systemImage: "square.and.arrow.up") }
-                    }.font(.subheadline)
+                    ShareLink(item: file) { Label("分享 / 导出", systemImage: "square.and.arrow.up") }
+                        .font(.subheadline)
                 } else if let error = state.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             }.padding(12).background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                 .accessibilityElement(children: .contain)
-                .sheet(item: $preview) { item in
-                    NavigationStack { CodexFilePreview(url: item.url).navigationTitle(item.url.lastPathComponent).navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { preview = nil } } } }
-                }
         }
     }
 }
