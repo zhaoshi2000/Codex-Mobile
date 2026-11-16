@@ -1,4 +1,4 @@
-# AstroGate Connect — 0.4.15
+# AstroGate Connect — 0.4.19-pc2
 
 手机在 AstroGate 管家的 Codex 页选择电脑 → 项目 → 原对话。执行仍由该电脑的 Codex 桌面版负责，使用电脑现有登录和会话设置。无需把 OpenAI 密钥传给手机或中转。
 
@@ -49,6 +49,10 @@
 手机发送结果不明确时保留同一个消息 ID，重试不会再次执行。请先刷新历史核实，不要复制内容换新 ID 重发。连接程序重启后仍保留去重记录；不要随意删除 `operations.json`。
 
 ## 电脑运行
+
+另一台 Windows x64 电脑可以使用同一便携包、同一中转服务；每台电脑分别首次配置并扫码配对。不需要额外安装 Node.js/Python，不需要复制原电脑源码或配置目录。电脑需要保持开机联网并运行 Codex 桌面版。Windows ARM64 尚未验证。
+
+0.4.19-pc2 增加独立安装版和正在运行的 Codex 安装目录识别；原路径因更新失效时会重新查找，只更新可执行文件路径，保留电脑身份与配对。二维码仅保存在用户状态目录，不再复制到桌面。打包可运行 `python Connect/package-windows.py --runtime <包含官方 Windows x64 node.exe 和 LICENSE 的目录>`，依赖须先在 Connect 内安装。
 
 Windows x64 便携包解压后，双击 `Open AstroGate Connect.cmd`。它使用包内的 Node.js 和依赖。请先打开并登录 Codex 桌面版。已配置的电脑直接出码，首次配置的电脑输入自己的中转 WSS 地址和连接密钥。密钥和配对状态保存在当前 Windows 用户目录。若需要修改中转配置，先停止当前连接进程，再运行 `"Open AstroGate Connect.cmd" -Configure`。
 

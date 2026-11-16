@@ -1,5 +1,6 @@
 ﻿param([string]$Config = "$env:USERPROFILE\.ifileplus-connect\bridge.config.json", [switch]$NoShowQR, [switch]$Restart, [switch]$EnsureRunning)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'find-codex.ps1')
 $configPath = (Resolve-Path -LiteralPath $Config).Path
 $settings = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $statePath = if ($settings.stateDir) { $settings.stateDir } else { Join-Path $env:USERPROFILE '.ifileplus-connect' }
@@ -23,12 +24,12 @@ if (Test-Path -LiteralPath $pidFile) {
         if ($EnsureRunning -and !$Restart) { return }
         if (!$Restart) {
             $qrPath = Join-Path $statePath 'pairing.png'
-            $before = (Get-Item -LiteralPath $qrPath).LastWriteTimeUtc
+            $before = [DateTime]::MinValue
+            if (Test-Path -LiteralPath $qrPath) { $before = (Get-Item -LiteralPath $qrPath).LastWriteTimeUtc }
             Set-Content -LiteralPath (Join-Path $statePath 'pairing-refresh.request') -Value 'refresh' -Encoding ASCII
             for ($n = 0; $n -lt 30; $n++) {
                 Start-Sleep -Milliseconds 300
-                if ((Get-Item -LiteralPath $qrPath).LastWriteTimeUtc -gt $before) {
-                    Copy-Item -LiteralPath $qrPath -Destination (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Codex-Pairing.png') -Force
+                if ((Test-Path -LiteralPath $qrPath) -and (Get-Item -LiteralPath $qrPath).LastWriteTimeUtc -gt $before) {
                     if (!$NoShowQR) { Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',('"' + (Join-Path $PSScriptRoot 'show-pairing.ps1') + '"'),'-Config',('"' + $configPath + '"')) -WindowStyle Normal }
                     Write-Output 'Pairing QR refreshed. Existing connections were kept.'
                     return
@@ -40,6 +41,7 @@ if (Test-Path -LiteralPath $pidFile) {
         Start-Sleep -Milliseconds 500
     }
 }
+Repair-CodexExecutable -ConfigPath $configPath
 $credentialFile = Join-Path $statePath 'relay.token'
 $env:IFILE_RELAY_TOKEN = (Get-Content -LiteralPath $credentialFile -Raw).Trim()
 try {
@@ -53,7 +55,6 @@ try {
         if ((Get-Content -LiteralPath (Join-Path $statePath 'bridge.log') -Raw -ErrorAction SilentlyContinue) -match 'pairing.png') { $ready = $true; break }
     }
     if (!$ready) { throw "Pairing was not ready within 15 seconds. See $statePath\bridge-error.log" }
-    Copy-Item -LiteralPath (Join-Path $statePath 'pairing.png') -Destination (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Codex-Pairing.png') -Force
     Write-Output "Pairing QR (valid for 2 minutes): $statePath\pairing.png"
 } finally { Remove-Item Env:IFILE_RELAY_TOKEN -ErrorAction SilentlyContinue }
 if (!$NoShowQR) {

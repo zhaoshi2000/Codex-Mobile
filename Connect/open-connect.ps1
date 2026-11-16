@@ -1,16 +1,13 @@
 ﻿param([switch]$Configure)
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'find-codex.ps1')
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
 
 function New-ConnectionSettings {
-    $package = Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1
-    $cli = if ($package) { Join-Path $package.InstallLocation 'app\resources\codex.exe' }
-    if (!$cli -or !(Test-Path -LiteralPath $cli -PathType Leaf)) {
-        $cli = (Get-Command codex.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-    }
+    $cli = Find-CodexExecutable
     if (!$cli) {
         $picker = New-Object Windows.Forms.OpenFileDialog
         try {
