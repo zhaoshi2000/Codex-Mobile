@@ -1,3 +1,4 @@
+import { speechClient } from "./speech.mjs";
 import { WebSocket } from "ws";
 import { randomUUID, randomBytes } from "node:crypto";
 import path from "node:path";
@@ -234,6 +235,7 @@ if (
     codexHome: config.codexHome,
     desktopCatalog: config.desktopCatalog === true,
   });
+  gateway.transcribe = speechClient({ relay: config.relay, token: process.env.IFILE_RELAY_TOKEN });
   await gateway.init();
   const bridge = new Bridge({
     relay: config.relay,

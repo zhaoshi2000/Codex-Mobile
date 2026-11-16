@@ -35,6 +35,8 @@
     </array>
     <key>NSLocalNetworkUsageDescription</key>
     <string>用于连接局域网内的 FTP、SFTP 和 SSH 服务器。</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>录制语音并交给你配置的电脑 CPU 转为文字，识别后由你确认发送。</string>
     <key>NSCameraUsageDescription</key>
     <string>扫描电脑生成的 Codex 配对二维码。</string>
     <key>UIFileSharingEnabled</key>

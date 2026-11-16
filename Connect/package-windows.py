@@ -8,7 +8,7 @@ import zipfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--runtime', required=True, type=Path, help='Directory containing node.exe and LICENSE')
-parser.add_argument('--version', default='0.4.21')
+parser.add_argument('--version', default='0.4.23')
 args = parser.parse_args()
 if not all(c.isalnum() or c in '.-' for c in args.version):
     parser.error('Invalid version')

@@ -1,0 +1,4 @@
+sherpa-onnx==2.0.1
+fastapi==0.121.3
+uvicorn==0.38.0
+numpy==2.2.6

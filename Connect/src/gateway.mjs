@@ -267,6 +267,10 @@ export class Gateway {
   }
   async dispatch(method, p, peer) {
     switch (method) {
+      case "transcribe": {
+        if (!this.transcribe) throw Error("请更新电脑连接程序以启用语音输入");
+        return this.transcribe(p);
+      }
       case "quota": {
         try { return quotaSummary(await this.rpc.call("account/rateLimits/read", {}, 15000)); }
         catch { return {available: false, windows: [], message: "暂时无法读取 Codex 额度，请确认电脑已登录 Codex，或稍后刷新。"}; }

@@ -50,6 +50,7 @@
 		AF0500000000000000000001 /* CodexDownloadState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0500000000000000000002; };
 		AF0160000000000000000001 /* CodexThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0160000000000000000002; };
 		AF0222000000000000000001 /* CodexNavigationCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0222000000000000000002; };
+		AF0223000000000000000001 /* CodexVoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0223000000000000000002; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -94,6 +95,7 @@
 		AF0500000000000000000002 /* CodexDownloadState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexDownloadState.swift; sourceTree = "<group>"; };
 		AF0160000000000000000002 /* CodexThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexThumbnailCache.swift; sourceTree = "<group>"; };
 		AF0222000000000000000002 /* CodexNavigationCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexNavigationCache.swift; sourceTree = "<group>"; };
+		AF0223000000000000000002 /* CodexVoiceInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexVoiceInput.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -135,6 +137,7 @@
 			534BC89917766F923BE19A09 /* CodexConnectService.swift */,
 			AF0480000000000000000002,
 			AF0222000000000000000002,
+			AF0223000000000000000002,
 				AF0160000000000000000002 /* CodexThumbnailCache.swift */,
 			AF0500000000000000000002,
 			9F56D9B4FE2C4A01877284B4 /* ConnectionStore.swift */,
@@ -213,6 +216,7 @@
 			AF0470000000000000000001,
 			AF0480000000000000000001,
 			AF0222000000000000000001,
+			AF0223000000000000000001,
 				AF0160000000000000000001 /* CodexThumbnailCache.swift in Sources */,
 			AF0500000000000000000001,
 			E12FCE149EB2443D9D7DC483,
@@ -303,11 +307,11 @@
 				"CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]" = NO;
 				DEVELOPMENT_TEAM = YOUR_TEAM_ID;
 				PROVISIONING_PROFILE_SPECIFIER = "YOUR_PROFILE_NAME";
-				CURRENT_PROJECT_VERSION = 29;
+				CURRENT_PROJECT_VERSION = 30;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iFilePlus/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.4.22;
+				MARKETING_VERSION = 0.4.23;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.AstroGate;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -328,11 +332,11 @@
 				"CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]" = NO;
 				DEVELOPMENT_TEAM = YOUR_TEAM_ID;
 				PROVISIONING_PROFILE_SPECIFIER = "YOUR_PROFILE_NAME";
-				CURRENT_PROJECT_VERSION = 29;
+				CURRENT_PROJECT_VERSION = 30;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iFilePlus/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.4.22;
+				MARKETING_VERSION = 0.4.23;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.AstroGate;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

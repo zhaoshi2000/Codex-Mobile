@@ -1,6 +1,6 @@
 # AstroGate 管家
 
-当前版本：**iPhone 0.4.22、Android 0.1.2**。Android 支持 Android 10 及以上，可直接安装 APK；复用现有电脑连接程序与加密中转。[Android 使用和构建说明](Android/README.md)。
+当前版本：**iPhone 0.4.23、Android 0.1.2**。Android 支持 Android 10 及以上，可直接安装 APK；复用现有电脑连接程序与加密中转。[Android 使用和构建说明](Android/README.md)。
 
 底部入口依次为 **Codex、连接、服务、设置**。Codex 是聊天主页；连接页显示已绑定电脑并支持扫码新建连接，选中电脑后进入 Codex；服务页包含文件管理器和 SSH、SFTP、OpenClaw 服务。原有配对与文件继续保留。
 
@@ -15,6 +15,8 @@
 SwiftUI 文件管理器，支持本地文件浏览与操作、文本编辑、双窗口、SFTP、SSH 终端、Codex 电脑连接和 OpenClaw 聊天。
 
 ## 本版改动
+
+- iPhone 0.4.23：聊天增加 CPU 实时语音转文字，边说边显示，完成后追加到草稿，可编辑后发送。需要更新电脑连接包并部署语音服务，见 [CPU 语音部署说明](Speech/README.md)。
 
 - iPhone 0.4.22：聊天左侧菜单按设备保留项目、对话分页及展开状态，打开时立即显示缓存，后台更新最近 20 条；重复打开合并请求，刷新失败保留旧内容。无需更新电脑连接程序。
 

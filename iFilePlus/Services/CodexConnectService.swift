@@ -343,10 +343,10 @@ extension Data {
         let result: [String: Any] = try await withCheckedThrowingContinuation { continuation in
             pending[id] = continuation
             deadlines[id] = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(45))
+                try? await Task.sleep(for: .seconds(method == "transcribe" ? 20 : 45))
                 guard !Task.isCancelled, let self, let c = self.pending.removeValue(forKey: id) else { return }
                 self.deadlines.removeValue(forKey: id)
-                c.resume(throwing: CodexConnectError(message: "请求超时。发送可能已到达电脑，请先刷新原对话确认。"))
+                c.resume(throwing: CodexConnectError(message: method == "transcribe" ? "语音识别连接超时，请检查网络与识别电脑。" : "请求超时。发送可能已到达电脑，请先刷新原对话确认。"))
             }
             enqueue(["id": id, "method": method, "params": params], encrypted: true)
         }

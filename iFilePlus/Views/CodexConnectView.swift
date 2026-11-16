@@ -463,6 +463,7 @@ private struct CodexChatContent: View {
                     }.padding(8).background(.secondary.opacity(0.12), in: Capsule())
                 } }.padding(.horizontal) }
             }
+            CodexVoiceInput(service: service, text: $draft, disabled: sending || uncertain).id(thread.id)
             HStack(alignment: .bottom) {
                 Menu {
                     Button("选择文件", systemImage: "doc") { importing = true }
