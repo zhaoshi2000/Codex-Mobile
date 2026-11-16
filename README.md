@@ -1,6 +1,8 @@
 # AstroGate 管家
 
-新增 **Android 0.1.0**，支持 Android 10 及以上，可直接安装 APK；复用现有电脑连接程序与加密中转。[Android 使用和构建说明](Android/README.md)。iPhone 当前版本为 0.4.19。
+当前版本：**iPhone 0.4.20、Android 0.1.1**。Android 支持 Android 10 及以上，可直接安装 APK；复用现有电脑连接程序与加密中转。[Android 使用和构建说明](Android/README.md)。
+
+底部入口依次为 **Codex、连接、服务、设置**。Codex 是聊天主页；连接页显示已绑定电脑并支持扫码新建连接，选中电脑后进入 Codex；服务页包含文件管理器和 SSH、SFTP、OpenClaw 服务。原有配对与文件继续保留。
 
 电脑连接程序补丁：兼容 Codex 输出文件卡片，将 PDF 等文件显示为手机可点击的下载链接，并支持对话内文件引用的下载授权。手机 App 无需重装。
 

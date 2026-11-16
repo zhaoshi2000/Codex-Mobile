@@ -3,24 +3,44 @@ import PhotosUI
 import UniformTypeIdentifiers
 import ImageIO
 
+struct CodexHomeView: View {
+    @EnvironmentObject private var store: CodexDeviceStore
+    @EnvironmentObject private var navigation: AppNavigation
+    private var device: CodexDevice? {
+        store.devices.first { $0.id == navigation.selectedDeviceID } ?? store.devices.first
+    }
+    var body: some View {
+        if let device {
+            CodexHostView(device: device)
+        } else {
+            ContentUnavailableView {
+                Label("在手机继续 Codex 对话", systemImage: "terminal")
+            } description: {
+                Text("先连接一台运行 Codex 的电脑，即可查看项目、继续对话或新建对话。")
+            } actions: {
+                Button("连接电脑") { navigation.tab = .connections }.buttonStyle(.borderedProminent)
+            }
+            .navigationTitle("Codex")
+        }
+    }
+}
+
 struct CodexConnectView: View {
-    @StateObject private var store = CodexDeviceStore()
+    @EnvironmentObject private var store: CodexDeviceStore
+    @EnvironmentObject private var navigation: AppNavigation
     @State private var pairing = false
     @State private var renaming: CodexDevice?
     @State private var deviceName = ""
     var body: some View {
         List {
             Section {
-                Label("在手机继续电脑上的 Codex 对话", systemImage: "desktopcomputer")
-                Text("选择电脑、项目和对话。记录保留在电脑，手机只加载当前浏览的内容。").font(.footnote).foregroundStyle(.secondary)
+                Label("连接电脑上的 Codex", systemImage: "desktopcomputer")
+                Text("选择已绑定的设备进入 Codex，或扫码新建连接。").font(.footnote).foregroundStyle(.secondary)
             }
-            ForEach(store.devices) { device in CodexActivitySection(device: device) }
-            Section("我的电脑") {
+            Section("已绑定设备") {
                 if store.devices.isEmpty { Text("点击右上角 + 扫码连接电脑").foregroundStyle(.secondary) }
                 ForEach(store.devices) { device in
-                    NavigationLink { CodexHostView(device: device) } label: {
-                        Label { VStack(alignment: .leading) { Text(device.displayName); Text(URL(string: device.relay)?.host ?? "").font(.caption).foregroundStyle(.secondary) } } icon: { Image(systemName: "desktopcomputer") }
-                    }
+                    CodexDeviceConnectionRow(device: device) { navigation.open(device) }
                     .swipeActions {
                         Button("移除", role: .destructive) { store.remove(device) }
                         Button("重命名") { deviceName = device.displayName; renaming = device }.tint(.blue)
@@ -32,15 +52,39 @@ struct CodexConnectView: View {
                 Text("电脑需保持 Codex 和连接程序运行。首次配对后无需重复扫码。移除设备只清除手机记录；撤销手机访问请在电脑端执行 revoke。").font(.footnote).foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Codex")
-        .toolbar { Button { pairing = true } label: { Image(systemName: "plus") }.accessibilityLabel("连接电脑") }
-        .sheet(isPresented: $pairing) { CodexPairView(store: store) }
+        .navigationTitle("连接")
+        .toolbar { Button { pairing = true } label: { Image(systemName: "plus") }.accessibilityLabel("新建 Codex 连接") }
+        .sheet(isPresented: $pairing) { CodexPairView(store: store) { device in pairing = false; navigation.open(device) } }
         .alert("重命名设备", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("设备名称", text: $deviceName)
             Button("取消", role: .cancel) { renaming = nil }
             Button("保存") { if let device = renaming { store.rename(device, to: deviceName) }; renaming = nil }
                 .disabled(deviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } message: { Text("仅修改这台手机上的设备名称，连接保持不变。") }
+    }
+}
+
+private struct CodexDeviceConnectionRow: View {
+    let device: CodexDevice
+    let open: () -> Void
+    @ObservedObject private var service: CodexConnectService
+    init(device: CodexDevice, open: @escaping () -> Void) {
+        self.device = device; self.open = open
+        _service = ObservedObject(wrappedValue: CodexConnectService.session(for: device))
+    }
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 12) {
+                Image(systemName: "desktopcomputer").foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(device.displayName).foregroundStyle(.primary)
+                    Text(service.connected ? "已连接 · 点击继续对话" : "点击连接 Codex").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if service.connected { Circle().fill(.green).frame(width: 8, height: 8).accessibilityLabel("已连接") }
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -73,6 +117,7 @@ private struct CodexActivitySection: View {
 
 private struct CodexPairView: View {
     @ObservedObject var store: CodexDeviceStore
+    var onPaired: (CodexDevice) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var link = ""
     @State private var scanning = false
@@ -91,10 +136,11 @@ private struct CodexPairView: View {
             .sheet(isPresented: $scanning) { CodexQRScanner { result in scanning = false; switch result { case .success(let value): add(value); case .failure(let e): error = e.localizedDescription } }.ignoresSafeArea() }
         }
     }
-    private func add(_ value: String) { do { try store.add(value); dismiss() } catch { self.error = error.localizedDescription } }
+    private func add(_ value: String) { do { let device = try store.add(value); dismiss(); onPaired(device) } catch { self.error = error.localizedDescription } }
 }
 
 private struct CodexHostView: View {
+    @EnvironmentObject private var navigation: AppNavigation
     @StateObject private var service: CodexConnectService
     @Environment(\.scenePhase) private var scenePhase
     @State private var projects: [CodexRow] = []
@@ -113,6 +159,7 @@ private struct CodexHostView: View {
                 if let error = service.error { Text(error).font(.footnote).foregroundStyle(.red) }
                 if !service.connected { Button("重新连接") { Task { await load() } }.disabled(loading) }
             }
+            CodexActivitySection(device: service.device)
             Group {
                 Section {
                     DisclosureGroup(isExpanded: $projectsExpanded) {
@@ -137,7 +184,10 @@ private struct CodexHostView: View {
             if loading { ProgressView() }
         }
         .navigationTitle(service.device.displayName).navigationBarTitleDisplayMode(.inline)
-        .toolbar { Button("新建对话", systemImage: "square.and.pencil") { creating = true }.disabled(!service.connected) }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { Button("连接设备", systemImage: "desktopcomputer") { navigation.tab = .connections } }
+            ToolbarItem(placement: .topBarTrailing) { Button("新建对话", systemImage: "square.and.pencil") { creating = true }.disabled(!service.connected) }
+        }
         .sheet(isPresented: $creating) { CodexNewChatView(service: service, projects: projects) { row in created = row; Task { await load() } } }
         .navigationDestination(item: $created) { row in CodexChatView(service: service, thread: row) }
         .task { await load() }
@@ -295,9 +345,9 @@ struct CodexDeleteChat: ViewModifier {
 struct CodexChatView: View {
     @ObservedObject var service: CodexConnectService
     @State var thread: CodexRow
-    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var navigation: AppNavigation
     var body: some View {
-        CodexChatContent(service: service, thread: thread, selectThread: { thread = $0 }, returnToDevice: { dismiss() }).id(thread.id)
+        CodexChatContent(service: service, thread: thread, selectThread: { thread = $0 }, returnToDevice: { navigation.tab = .connections }).id(thread.id)
     }
 }
 

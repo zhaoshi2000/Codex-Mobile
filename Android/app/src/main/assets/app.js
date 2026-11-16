@@ -1,6 +1,6 @@
 "use strict";
 const $ = (s2) => document.querySelector(s2), E = Core.escape;
-const icons = { files: "M3 6h6l2 2h10v12H3z M3 6V4h7l2 2", connect: "M8 3H5v18h14V3h-3 M9 3h6v4H9z M9 17h6", codex: "M3 4h18v16H3z M7 9l3 3-3 3 M13 15h4", settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M5 19l2-2 M17 7l2-2", menu: "M4 6h16 M4 12h16 M4 18h16", back: "M15 5l-7 7 7 7", plus: "M12 4v16 M4 12h16", send: "M12 20V4 M5 11l7-7 7 7", stop: "M6 6h12v12H6z", copy: "M9 8h11v13H9z M15 8V3H4v13h5", fork: "M7 3v7c0 3 5 3 5 6v5 M17 3v7c0 3-5 3-5 6 M4 3h6 M14 3h6", down: "M5 9l7 7 7-7", more: "M5 12h.01 M12 12h.01 M19 12h.01", image: "M3 3h18v18H3z M3 17l6-6 4 4 3-3 5 5 M15 7h.01", scan: "M3 8V3h5 M16 3h5v5 M3 16v5h5 M16 21h5v-5 M7 7h3v3H7z M14 7h3v3h-3z M7 14h3v3H7z M14 14h3v3h-3z", file: "M5 2h9l5 5v15H5z M14 2v6h5 M8 12h8 M8 16h8", close: "M5 5l14 14 M19 5L5 19", cloud: "M6 18a5 5 0 0 1-1-10 7 7 0 0 1 13-1 5 5 0 0 1 0 11z", edit: "M4 16l11-11 4 4L8 20H4z M14 6l4 4", check: "M4 12l5 5L20 6", share: "M12 16V2 M7 7l5-5 5 5 M5 11H3v11h18V11h-2" };
+const icons = { files: "M3 6h6l2 2h10v12H3z M3 6V4h7l2 2", connect: "M2 3h20v14H2z M12 17v4 M7 21h10", services: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z", codex: "M3 4h18v16H3z M7 9l3 3-3 3 M13 15h4", settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M5 19l2-2 M17 7l2-2", menu: "M4 6h16 M4 12h16 M4 18h16", back: "M15 5l-7 7 7 7", plus: "M12 4v16 M4 12h16", send: "M12 20V4 M5 11l7-7 7 7", stop: "M6 6h12v12H6z", copy: "M9 8h11v13H9z M15 8V3H4v13h5", fork: "M7 3v7c0 3 5 3 5 6v5 M17 3v7c0 3-5 3-5 6 M4 3h6 M14 3h6", down: "M5 9l7 7 7-7", more: "M5 12h.01 M12 12h.01 M19 12h.01", image: "M3 3h18v18H3z M3 17l6-6 4 4 3-3 5 5 M15 7h.01", scan: "M3 8V3h5 M16 3h5v5 M3 16v5h5 M16 21h5v-5 M7 7h3v3H7z M14 7h3v3h-3z M7 14h3v3H7z M14 14h3v3h-3z", file: "M5 2h9l5 5v15H5z M14 2v6h5 M8 12h8 M8 16h8", close: "M5 5l14 14 M19 5L5 19", cloud: "M6 18a5 5 0 0 1-1-10 7 7 0 0 1 13-1 5 5 0 0 1 0 11z", edit: "M4 16l11-11 4 4L8 20H4z M14 6l4 4", check: "M4 12l5 5L20 6", share: "M12 16V2 M7 7l5-5 5 5 M5 11H3v11h18V11h-2" };
 const icon = (n) => `<span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icons[n] || icons.file}"/></svg></span>`;
 const btn = (action2, name, title = "", extra = "") => `<button data-action="${action2}" aria-label="${E(title || name)}" ${extra}>${icon(name)}</button>`;
 const pending = /* @__PURE__ */ new Map();
@@ -24,7 +24,7 @@ window.nativeReply = ({ id, result, error }) => {
   error ? p.reject(Error(error)) : p.resolve(result);
 };
 const rpc = (method, params = {}) => call("rpc", { method, params });
-const s = { tab: "codex", route: "devices", boot: { devices: [], servers: [] }, device: null, thread: null, messages: [], cursor: null, threadCursor: null, threads: [], projects: [], tasks: [], questions: [], queue: [], attachments: [], model: "", busy: false, turnId: null, connected: false, navProject: null, server: null, folder: "", remoteFolder: ".", files: [], draft: "", loading: false, download: null, models: [], aiMessages: [], aiBusy: false, aiText: "", clawSession: null };
+const s = { tab: "codex", route: "home", boot: { devices: [], servers: [] }, device: null, thread: null, messages: [], cursor: null, threadCursor: null, threads: [], projects: [], tasks: [], questions: [], queue: [], attachments: [], model: "", busy: false, turnId: null, connected: false, navProject: null, server: null, folder: "", remoteFolder: ".", files: [], draft: "", loading: false, download: null, models: [], aiMessages: [], aiBusy: false, aiText: "", clawSession: null };
 let modelGeneration = 0;
 const terminalBuffers = /* @__PURE__ */ new Map();
 let thumbCache = /* @__PURE__ */ new Map(), photoSelection = /* @__PURE__ */ new Map(), openDetails = /* @__PURE__ */ new Set(), detailsCache = /* @__PURE__ */ new Map(), modalDone = null, term = null, termFit = null, reconnectTimer, refreshing = false, renderTimer;
@@ -70,7 +70,7 @@ function header(title, left, right) {
   $("#header").innerHTML = (left || "") + `<strong>${E(title)}</strong>` + (right || "");
 }
 function tabs() {
-  const rows = [["files", "文件"], ["connect", "连接"], ["codex", "Codex"], ["settings", "设置"]];
+  const rows = [["codex", "Codex"], ["connect", "连接"], ["services", "服务"], ["settings", "设置"]];
   $("#tabs").innerHTML = rows.map(([id, label]) => `<button data-action="tab" data-tab="${id}" class="${s.tab === id ? "selected" : ""}">${icon(id)}${label}</button>`).join("");
 }
 function showPage(html, classes = "") {
@@ -98,8 +98,9 @@ function render() {
   if (s.tab === "codex") {
     if (s.route === "chat") renderChat();
     else if (s.route === "threads") renderThreads();
-    else renderDevices();
-  } else if (s.tab === "files") renderFiles();
+    else renderCodexHome();
+  } else if (s.tab === "connect") renderDevices();
+  else if (s.tab === "services" && s.route === "files") renderFiles();
   else if (s.tab === "settings") renderSettings();
   else if (s.route === "terminal") renderTerminal();
   else if (s.route === "sftp") renderRemoteFiles();
@@ -107,9 +108,40 @@ function render() {
   else if (s.route === "claw") renderClaw();
   else renderServers();
 }
+function renderCodexHome() {
+  header("Codex", null, btn("devices", "connect", "连接设备"));
+  showPage(empty("在手机继续 Codex 对话", "连接一台电脑，即可查看项目、继续对话或新建对话。", `<button class="primary" data-action="devices">连接电脑</button>`));
+}
+function resetCodex() {
+  clearTimeout(renderTimer);
+  s.thread = null;
+  s.messages = [];
+  s.attachments = [];
+  s.draft = "";
+  s.busy = false;
+  s.model = "";
+  s.models = [];
+  s.questions = [];
+  s.queue = [];
+  s.projects = [];
+  s.threads = [];
+  s.tasks = [];
+  s.navProject = null;
+  s.cursor = null;
+  s.threadCursor = null;
+  s.progress = null;
+  s.turnId = null;
+  s.status = "";
+  s.unread = [];
+  s.runningProjects = [];
+  thumbCache.clear();
+  photoSelection.clear();
+  openDetails.clear();
+  detailsCache.clear();
+}
 function renderDevices() {
-  header("AstroGate 管家", null, btn("pair", "plus", "绑定电脑"));
-  showPage(`<h1>随时连接你的电脑</h1><p class="hint">扫码绑定，继续电脑上的 Codex 对话。</p>${s.boot.devices.length ? `<div class="section">我的设备</div><div class="card list">${s.boot.devices.map((d) => {
+  header("连接", null, btn("pair", "plus", "新建 Codex 连接"));
+  showPage(`<h1>连接电脑上的 Codex</h1><p class="hint">扫码绑定，继续电脑上的 Codex 对话。</p>${s.boot.devices.length ? `<div class="section">已绑定设备</div><div class="card list">${s.boot.devices.map((d) => {
     var _a;
     return `<div class="item"><button class="grow row" data-action="connect" data-id="${E(d.hostId)}">${icon("connect")}<span class="grow name">${E(deviceName(d))}<small>${((_a = s.device) == null ? void 0 : _a.hostId) === d.hostId && s.connected ? "已连接" : "点击连接"}</small></span></button>${btn("deviceMenu", "more", "设备选项", `data-id="${E(d.hostId)}"`)}</div>`;
   }).join("")}</div>` : empty("添加第一台电脑", "在电脑运行 AstroGate Connect，用手机扫描配对二维码。", `<button class="primary" data-action="pair">${icon("scan")} 扫码绑定</button>`)}<div class="card"><strong>原对话，接着聊</strong><p class="hint">消息和文件保留在电脑；跨网络通过服务器转发加密数据。电脑需要保持开机并运行连接程序。</p></div>`);
@@ -129,23 +161,40 @@ async function pair(uri) {
   await connect(d.hostId);
 }
 async function connect(id) {
+  var _a, _b;
+  if (s.loading) return;
+  if (((_a = s.device) == null ? void 0 : _a.hostId) === id && s.connected) {
+    s.tab = "codex";
+    s.route = s.thread ? "chat" : "threads";
+    render();
+    await refresh();
+    return;
+  }
   clearTimeout(reconnectTimer);
   s.loading = true;
   toast("正在验证电脑身份…");
   try {
+    if (((_b = s.device) == null ? void 0 : _b.hostId) !== id) resetCodex();
+    s.connected = false;
+    s.device = null;
     await call("connect", { id });
     s.connected = true;
     s.device = s.boot.devices.find((d) => d.hostId === id);
-    s.route = "threads";
-    s.navProject = null;
+    s.tab = "codex";
+    s.route = s.thread ? "chat" : "threads";
+    render();
     await loadThreads();
+    if (s.thread) await refresh();
   } finally {
     s.loading = false;
   }
 }
 async function loadThreads(more = false) {
+  var _a, _b;
   if (!s.connected) return;
+  const deviceID = (_a = s.device) == null ? void 0 : _a.hostId;
   const [page, nav, activity] = await Promise.all([rpc("threads", { limit: 20, ...s.navProject ? { projectId: s.navProject } : {}, ...more && s.threadCursor ? { cursor: s.threadCursor } : {} }), rpc("navigation"), rpc("activity")]);
+  if (((_b = s.device) == null ? void 0 : _b.hostId) !== deviceID || !s.connected) return;
   s.threads = more ? [...s.threads, ...page.threads] : page.threads || [];
   s.threadCursor = page.nextCursor;
   s.projects = nav.projects || [];
@@ -163,6 +212,8 @@ function projectBlock() {
 }
 function renderThreads() {
   var _a;
+  if (s.tab !== "codex" || s.route !== "threads") return;
+  tabs();
   header(s.navProject ? ((_a = s.projects.find((p) => p.id === s.navProject)) == null ? void 0 : _a.name) || "项目" : deviceName(s.device || {}), btn("devices", "back", "返回设备列表"), btn("newThread", "edit", "新建对话"));
   showPage(`<div class="card row"><i class="dot green"></i><div>已连接 ${E(deviceName(s.device || {}))}<p class="hint">电脑本机记录 · 加密连接</p></div></div>${!s.navProject ? projectBlock() : ""}<div class="section">${s.navProject ? "项目对话" : "最近对话"}</div><div class="card list">${threadRows(s.threads)}</div>${s.threadCursor ? '<button data-action="moreThreads">查看更多</button>' : ""}${!s.threads.length ? empty("还没有对话", "点击右上角新建对话") : ""}`);
 }
@@ -267,6 +318,8 @@ function messagesHTML() {
 }
 function renderChat(bottom = false) {
   var _a, _b;
+  if (s.tab !== "codex" || s.route !== "chat") return;
+  tabs();
   header(((_a = s.thread) == null ? void 0 : _a.title) || "对话", `${btn("drawer", "menu", "打开对话列表")}${s.tasks.length ? `<small>${s.tasks.length}</small>` : ""}`, btn("computerFiles", "files", "电脑文件"));
   const page = $("#page");
   let previous = page.scrollTop, atBottom = page.scrollHeight - page.clientHeight - page.scrollTop < 120;
@@ -315,7 +368,7 @@ function renderDownload() {
   const el = $("#downloadBox");
   if (!el || !s.download) return;
   const d = s.download;
-  if (d.phase === "saved") el.innerHTML = `<div class="download"><div class="row"><strong class="grow">✓ 下载成功</strong><button data-action="dismissDownload">×</button></div><p>${E(d.file.name)}</p><small>已保存到：文件 / ${E(d.file.path)}</small><div><button data-action="shareDownload">${icon("share")} 分享 / 导出</button></div></div>`;
+  if (d.phase === "saved") el.innerHTML = `<div class="download"><div class="row"><strong class="grow">✓ 下载成功</strong><button data-action="dismissDownload">×</button></div><p>${E(d.file.name)}</p><small>已保存到：服务 → 文件管理器 / ${E(d.file.path)}</small><div><button data-action="shareDownload">${icon("share")} 分享 / 导出</button></div></div>`;
   else if (d.phase === "failed") el.innerHTML = `<div class="download error">${E(d.message)} <button data-action="dismissDownload">关闭</button></div>`;
   else el.innerHTML = `<div class="download"><div class="row"><span class="grow">${E(d.name || "正在准备下载…")}</span><button data-action="cancelDownload">取消</button></div><progress ${d.total ? `value="${d.received}" max="${d.total}"` : ""}></progress><small>${d.total ? `${Math.round(d.received / d.total * 100)}% · ${size(d.received)} / ${size(d.total)}` : "正在连接电脑"}${d.phase === "verifying" ? " · 正在校验" : ""}</small></div>`;
 }
@@ -485,7 +538,7 @@ function size(n) {
   return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : n >= 1024 ? (n / 1024).toFixed(1) + " KB" : n + " B";
 }
 function renderFiles() {
-  header("文件", s.folder ? btn("folderUp", "back", "上一级") : null, btn("fileAdd", "plus", "添加文件"));
+  header("文件管理器", s.folder ? btn("folderUp", "back", "上一级") : btn("servers", "back", "返回服务"), btn("fileAdd", "plus", "添加文件"));
   showPage(`<p class="hint">${E(s.folder || "本机文件")} · 文件保存在此设备</p><div class="card list">${s.files.map((f, i) => `<div class="item"><button class="grow row" data-action="localFile" data-index="${i}">${icon(f.directory ? "files" : "file")}<span class="grow name">${E(f.name)}<small>${f.directory ? "文件夹" : size(f.size)}</small></span></button>${btn("localMenu", "more", "文件选项", `data-index="${i}"`)}</div>`).join("")}</div>${!s.files.length ? empty("此文件夹为空", "点击 + 导入文件或新建文件夹") : ""}`);
 }
 async function loadFiles() {
@@ -493,8 +546,8 @@ async function loadFiles() {
   renderFiles();
 }
 function renderServers() {
-  header("远程连接", null, btn("serverAdd", "plus", "添加服务器"));
-  showPage(`<h1>你的服务器</h1><p class="hint">SSH 终端、SFTP / FTP 文件和 OpenClaw 会话。</p><div class="card list">${s.boot.servers.map((d) => `<div class="item"><button class="grow row" data-action="server" data-id="${E(d.id)}">${icon(d.type === "sftp" ? "files" : "codex")}<span class="grow name">${E(d.name || d.host)}<small>${E((d.type || "ssh").toUpperCase())} · ${E(d.host + ":" + (d.port || 22))}</small></span></button>${btn("serverMenu", "more", "服务器选项", `data-id="${E(d.id)}"`)}</div>`).join("")}</div>${!s.boot.servers.length ? empty("添加远程连接", "首次连接会显示服务器指纹，确认信任后才进行登录。", `<button class="primary" data-action="serverAdd">添加服务器</button>`) : ""}`);
+  header("服务", null, btn("serverAdd", "plus", "添加服务"));
+  showPage(`<div class="card list"><button class="item" data-action="localFiles">${icon("files")}<span class="grow">文件管理器</span>›</button></div><div class="section">服务器服务</div><p class="hint">SSH 终端、SFTP / FTP 文件和 OpenClaw 会话。</p><div class="card list">${s.boot.servers.map((d) => `<div class="item"><button class="grow row" data-action="server" data-id="${E(d.id)}">${icon(d.type === "sftp" ? "files" : "codex")}<span class="grow name">${E(d.name || d.host)}<small>${E((d.type || "ssh").toUpperCase())} · ${E(d.host + ":" + (d.port || 22))}</small></span></button>${btn("serverMenu", "more", "服务器选项", `data-id="${E(d.id)}"`)}</div>`).join("")}</div>${!s.boot.servers.length ? empty("添加服务器服务", "首次连接会显示服务器指纹，确认信任后才进行登录。", `<button class="primary" data-action="serverAdd">添加服务器</button>`) : ""}`);
 }
 async function serverForm(id) {
   const d = s.boot.servers.find((x) => x.id === id) || {};
@@ -519,7 +572,8 @@ async function serverCall(op, p) {
 }
 async function openServer(id) {
   s.server = s.boot.servers.find((d) => d.id === id);
-  s.tab = "connect";
+  s.tab = "services";
+  tabs();
   s.route = ["sftp", "ftp"].includes(s.server.type) ? "sftp" : s.server.type === "openclaw" ? "claw" : "terminal";
   if (s.route === "terminal") {
     render();
@@ -537,7 +591,7 @@ async function openServer(id) {
   }
 }
 function renderTerminal() {
-  header(s.server.name || "SSH 终端", btn("servers", "back", "返回连接"), btn("serverAI", "cloud", "AI 操作服务器"));
+  header(s.server.name || "SSH 终端", btn("servers", "back", "返回服务"), btn("serverAI", "cloud", "AI 操作服务器"));
   showPage(`<div class="terminalstatus" id="terminalStatus">正在连接 ${E(s.server.host)}…</div><div class="terminalbox" id="terminal"></div><div class="terminalkeys">${[["Esc", "\x1B"], ["Tab", "	"], ["Ctrl+C", ""], ["Ctrl+D", ""], ["↑", "\x1B[A"], ["↓", "\x1B[B"], ["←", "\x1B[D"], ["→", "\x1B[C"]].map(([n, k]) => `<button data-action="terminalKey" data-key="${E(JSON.stringify(k))}">${n}</button>`).join("")}</div><div class="terminalinput"><input id="terminalCommand" placeholder="输入命令…" autocomplete="off"><button data-action="terminalSend">${icon("send")}</button></div>`, "terminalpage");
   term == null ? void 0 : term.dispose();
   term = new Terminal({ fontSize: 13, fontFamily: "monospace", cursorBlink: true, scrollback: 2e3, theme: { background: "#10151e", foreground: "#d6e4f1" }, convertEol: false });
@@ -572,7 +626,7 @@ async function loadRemote() {
   renderRemoteFiles();
 }
 function renderRemoteFiles() {
-  header(s.server.name || "SFTP 文件", btn("servers", "back", "返回连接"), btn("remoteAdd", "plus", "添加文件"));
+  header(s.server.name || "SFTP 文件", btn("servers", "back", "返回服务"), btn("remoteAdd", "plus", "添加文件"));
   showPage(`<div id="downloadBox"></div><div class="row"><button data-action="remoteUp">上一级</button><span class="hint ellipsis">${E(s.remoteFolder)}</span></div><div class="card list">${(s.remoteFiles || []).map((f, i) => `<div class="item"><button class="grow row" data-action="remoteFile" data-index="${i}">${icon(f.directory ? "files" : "file")}<span class="grow name">${E(f.name)}<small>${f.directory ? "文件夹" : size(f.size)}</small></span></button>${btn("remoteDelete", "more", "文件选项", `data-index="${i}"`)}</div>`).join("")}</div>`);
 }
 function renderSettings() {
@@ -665,7 +719,7 @@ async function loadClawSessions() {
   renderClaw();
 }
 function renderClaw() {
-  header(s.clawSession ? "OpenClaw · " + s.clawSession : "OpenClaw", btn("servers", "back", "返回连接"), btn("clawNew", "plus", "新会话"));
+  header(s.clawSession ? "OpenClaw · " + s.clawSession : "OpenClaw", btn("servers", "back", "返回服务"), btn("clawNew", "plus", "新会话"));
   if (!s.clawSession) {
     showPage(`<p class="hint">${E(s.server.name || s.server.host)} · 选择服务器上的会话</p><div class="card list">${(s.clawSessions || []).map((x) => `<button class="item" data-action="clawSession" data-key="${E(x.key)}">${icon("codex")}<span class="grow name">${E(x.displayName || x.label || x.key)}</span></button>`).join("")}</div><button data-action="clawRefresh">刷新会话</button>`);
     return;
@@ -803,18 +857,19 @@ window.goBack = () => {
       s.route = "threads";
       await loadThreads();
     } else if (s.tab === "codex" && s.route === "threads") {
+      s.tab = "connect";
       s.route = "devices";
       render();
-    } else if (s.tab === "files" && s.folder) {
+    } else if (s.tab === "services" && s.route === "files" && s.folder) {
       s.folder = s.folder.split(/[\\/]/).slice(0, -1).join("/");
       await loadFiles();
-    } else if (s.tab === "connect" && s.route !== "servers") {
+    } else if (s.tab === "services" && s.route !== "servers") {
       s.route = "servers";
       render();
-    } else if (s.tab === "codex" && s.route === "devices") await call("exit");
+    } else if (s.tab === "codex" && s.route === "home") await call("exit");
     else {
       s.tab = "codex";
-      s.route = "devices";
+      s.route = s.thread ? "chat" : s.device && s.connected ? "threads" : "home";
       render();
     }
   });
@@ -839,14 +894,14 @@ document.addEventListener("click", (e) => {
   safe(() => action(b.dataset.action, b));
 });
 async function action(a, b) {
-  var _a, _b;
+  var _a, _b, _c, _d;
   switch (a) {
     case "tab":
       s.tab = b.dataset.tab;
       $("#drawer").hidden = true;
-      s.route = s.tab === "codex" ? s.thread ? "chat" : s.device && s.connected ? "threads" : "devices" : s.tab === "connect" ? "servers" : s.tab;
-      if (s.tab === "files") await loadFiles();
-      else render();
+      s.route = s.tab === "codex" ? s.thread ? "chat" : s.device && s.connected ? "threads" : "home" : s.tab === "connect" ? "devices" : s.tab === "services" ? "servers" : "settings";
+      render();
+      if (s.tab === "codex") await refresh();
       break;
     case "pair":
       await pair();
@@ -859,16 +914,28 @@ async function action(a, b) {
       const v = await modal("设备选项", field("name", "设备名称", deviceName(d)), [["取消", false], ["删除", "delete"], ["重命名", true]]);
       if (v) {
         if (v.__choice === "delete") {
-          if (await confirm("删除设备", "移除此手机保存的配对？")) s.boot = await call("remove", { kind: "devices", id });
-        } else s.boot = await call("renameDevice", { id, name: v.name });
+          if (await confirm("删除设备", "移除此手机保存的配对？")) {
+            s.boot = await call("remove", { kind: "devices", id });
+            if (((_a = s.device) == null ? void 0 : _a.hostId) === id) {
+              clearTimeout(reconnectTimer);
+              resetCodex();
+              s.device = null;
+              s.connected = false;
+            }
+          }
+        } else {
+          s.boot = await call("renameDevice", { id, name: v.name });
+          if (((_b = s.device) == null ? void 0 : _b.hostId) === id) s.device = s.boot.devices.find((x) => x.hostId === id);
+        }
         renderDevices();
       }
       break;
     }
     case "devices":
       $("#drawer").hidden = true;
+      s.tab = "connect";
       s.route = "devices";
-      renderDevices();
+      render();
       break;
     case "newThread": {
       const v = await modal("新建对话", field("title", "对话名称（可选）") + `<label>所属项目</label><select name="projectId"><option value="">不属于项目</option>${s.projects.map((p) => `<option value="${E(p.id)}" ${p.id === s.navProject ? "selected" : ""}>${E(p.name)}</option>`).join("")}</select>`);
@@ -940,7 +1007,7 @@ async function action(a, b) {
       const v = await modal("选择模型", `<select name="model">${r.models.map((m) => `<option value="${E(m.id)}" ${m.id === s.model ? "selected" : ""}>${E(m.name || m.id)}</option>`).join("")}</select>`);
       if (v) {
         const result = await rpc("setModel", { threadId: s.thread.id, model: v.model });
-        s.model = ((_a = result.current) == null ? void 0 : _a.model) || v.model;
+        s.model = ((_c = result.current) == null ? void 0 : _c.model) || v.model;
         renderStatus();
       }
       break;
@@ -977,7 +1044,7 @@ async function action(a, b) {
       break;
     }
     case "answer": {
-      const g = s.questions.find((g2) => g2.id === b.dataset.group), r = await rpc("answer", { threadId: s.thread.id, groupId: g.id, messageId: Core.uuid(), answers: ((_b = s.answers) == null ? void 0 : _b[g.id]) || {} });
+      const g = s.questions.find((g2) => g2.id === b.dataset.group), r = await rpc("answer", { threadId: s.thread.id, groupId: g.id, messageId: Core.uuid(), answers: ((_d = s.answers) == null ? void 0 : _d[g.id]) || {} });
       if (r.state === "unknown") toast("答案送达情况待确认");
       else {
         s.questions = s.questions.filter((x) => x.id !== g.id);
@@ -1003,6 +1070,11 @@ async function action(a, b) {
       break;
     case "computerFiles":
       await computerFiles("");
+      break;
+    case "localFiles":
+      s.tab = "services";
+      s.route = "files";
+      await loadFiles();
       break;
     case "folderUp":
       s.folder = s.folder.split(/[\\/]/).slice(0, -1).join("/");
@@ -1064,8 +1136,9 @@ async function action(a, b) {
       break;
     }
     case "servers":
+      s.tab = "services";
       s.route = "servers";
-      renderServers();
+      render();
       break;
     case "terminalKey":
       await call("terminalInput", { id: s.server.id, text: JSON.parse(b.dataset.key) });
@@ -1199,7 +1272,7 @@ setInterval(() => {
   var _a;
   if (s.connected && s.route === "chat") safe(refreshQueue);
   if (s.connected && s.route === "threads") safe(loadThreads);
-  if (s.tab === "connect" && s.route === "claw" && s.clawSession && !((_a = document.activeElement) == null ? void 0 : _a.matches("textarea"))) safe(clawHistory);
+  if (s.tab === "services" && s.route === "claw" && s.clawSession && !((_a = document.activeElement) == null ? void 0 : _a.matches("textarea"))) safe(clawHistory);
 }, 12e3);
 safe(boot);
 document.addEventListener("change", (e) => {

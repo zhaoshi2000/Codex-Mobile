@@ -1,0 +1,72 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import http from 'node:http';
+import {spawn} from 'node:child_process';
+import assert from 'node:assert/strict';
+const repo=path.resolve(import.meta.dirname,'../..');
+process.chdir(repo);
+await fs.mkdir('Build',{recursive:true});
+const root=path.resolve('Android/app/src/main/assets'),checks=[];
+const mock=`window.fixture={devices:[{hostId:'pc-a',name:'电脑 A'},{hostId:'pc-b',name:'电脑 B'}],servers:[{id:'ssh',name:'SSH 测试',type:'ssh',host:'example.invalid'},{id:'sftp',name:'文件服务',type:'sftp',host:'example.invalid'},{id:'oc',name:'OpenClaw',type:'openclaw',host:'example.invalid'}]};
+window.Native={call(id,op,json){let p=JSON.parse(json),r={};if(op==='boot')r=fixture;if(op==='localList'||op==='sftpList')r=[];
+if(op==='rpc'){switch(p.method){case 'threads':r={threads:[{id:'chat-'+window.pc,title:'测试对话 '+window.pc}]};break;case 'navigation':r={projects:[{id:'p1',name:'项目一'}],unread:[]};break;case 'activity':r={tasks:[]};break;case 'watch':r={writable:true};break;case 'history':r={messages:[{id:'m1',role:'assistant',text:'测试回复',turnId:'turn1'}]};break;case 'models':r={models:[],current:{model:'test'}};break;case 'queued':r={messages:[]};break;}}
+if(op==='connect')window.pc=p.id;
+if(op==='pair'){fixture.devices.push({hostId:'pc-c',name:'电脑 C'});r=fixture;}
+if(op==='renameDevice'){fixture.devices.find(d=>d.hostId===p.id).alias=p.name;r=fixture;}
+if(op==='remove'){fixture[p.kind]=fixture[p.kind].filter(d=>d.hostId!==p.id);r=fixture;}
+queueMicrotask(()=>nativeReply({id,result:structuredClone(r)}));}};`;
+const server=http.createServer(async(req,res)=>{try{let url=req.url.split('?')[0];if(url==='/native.js'){res.setHeader('Content-Type','text/javascript');res.end(mock);return;}const file=path.join(root,url==='/'?'index.html':url);if(!file.startsWith(root+path.sep)){res.writeHead(403);res.end();return;}let data=await fs.readFile(file);if(url==='/')data=Buffer.from(data.toString().replace('<script src="polyfills.js">','<script src="/native.js"></script><script src="polyfills.js">'));res.setHeader('Content-Type',file.endsWith('.html')?'text/html':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'application/octet-stream');res.end(data);}catch{res.writeHead(404);res.end();}});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));
+const chrome=spawn(process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--no-first-run','--no-default-browser-check','--remote-debugging-port=9238','--user-data-dir='+path.resolve('Build/navigation-chrome'),'about:blank'],{windowsHide:true,stdio:'ignore'});
+let ws;
+try{
+ let pages;for(let i=0;i<80;i++){try{pages=await(await fetch('http://127.0.0.1:9238/json')).json();if(pages.length)break;}catch{}await new Promise(r=>setTimeout(r,250));}
+ ws=new WebSocket(pages[0].webSocketDebuggerUrl);await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});let seq=0;const pending=new Map();ws.onmessage=e=>{const v=JSON.parse(e.data),p=pending.get(v.id);if(p){pending.delete(v.id);v.error?p.reject(Error(JSON.stringify(v.error))):p.resolve(v.result);}};
+ const cmd=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}));});
+ const run=async(code)=>{const r=await cmd('Runtime.evaluate',{expression:`(async()=>{${code}})()`,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result?.value;};
+ const check=async(name,code)=>{assert.ok(await run('return '+code),name);checks.push(name);console.log('PASS',name);};
+ const click=async(selector)=>{await run(`document.querySelector(${JSON.stringify(selector)}).click()`);await new Promise(r=>setTimeout(r,150));};
+ await cmd('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:2,mobile:true});
+ await cmd('Page.navigate',{url:'http://127.0.0.1:'+server.address().port+'/'});
+ for(let i=0;i<60;i++){if(await run("return document.querySelectorAll('#tabs button').length===4"))break;await new Promise(r=>setTimeout(r,150));}
+ await check('Tabs ordered Codex, connections, services, settings',`[...document.querySelectorAll('#tabs button')].map(b=>b.textContent).join(',')==='Codex,连接,服务,设置'`);
+ await check('Codex is default with connection action',`s.tab==='codex'&&document.querySelector('#page [data-action=devices]')!==null`);
+ await click('#page [data-action=devices]');
+ await check('Connections lists paired computers and add control',`s.tab==='connect'&&document.querySelectorAll('[data-action=connect]').length===2&&document.querySelector('#header [data-action=pair]')!==null`);
+ await click('[data-action=connect][data-id=pc-a]');
+ await check('Selecting computer opens Codex projects and conversations',`s.tab==='codex'&&s.route==='threads'&&s.device.hostId==='pc-a'&&document.querySelector('#projectlist')!==null`);
+ await click('[data-action=thread]');
+ await check('Chat opens in first tab',`s.tab==='codex'&&s.thread.id==='chat-pc-a'&&document.querySelector('#page').textContent.includes('测试回复')`);
+ await run(`s.draft='未发送的草稿';renderComposer()`);
+ await click('[data-tab=connect]');await click('[data-tab=codex]');
+ await check('Switching tabs preserves conversation and draft',`s.route==='chat'&&s.thread.id==='chat-pc-a'&&document.querySelector('#draft').value==='未发送的草稿'`);
+ await click('[data-action=drawer]');await click('#drawer [data-action=devices]');
+ await check('Drawer returns to connections tab',`s.tab==='connect'&&s.route==='devices'&&document.querySelector('#drawer').hidden`);
+ await click('[data-action=connect][data-id=pc-a]');
+ await check('Selecting same connected device resumes chat',`s.route==='chat'&&s.thread.id==='chat-pc-a'`);
+ await click('[data-tab=connect]');await click('[data-action=connect][data-id=pc-b]');
+ await check('Switching computers clears previous conversation state',`s.tab==='codex'&&s.device.hostId==='pc-b'&&s.thread===null&&s.messages.length===0&&s.draft===''&&s.threads[0].id==='chat-pc-b'`);
+ await click('[data-tab=services]');
+ await check('Services contains file manager and server entries',`document.querySelector('[data-action=localFiles]')!==null&&document.querySelectorAll('[data-action=server]').length===3&&!document.querySelector('[data-action=pair]')`);
+ await fs.writeFile('Build/navigation-services.png',Buffer.from((await cmd('Page.captureScreenshot',{format:'png'})).data,'base64'));
+ await click('[data-action=localFiles]');
+ await check('File manager belongs to services',`s.tab==='services'&&s.route==='files'&&document.querySelector('#header').textContent.includes('文件管理器')`);
+ await click('#header [data-action=servers]');await click('[data-action=server][data-id=ssh]');
+ await check('SSH opens terminal directly under services',`s.tab==='services'&&s.route==='terminal'&&document.querySelector('#terminalStatus').textContent.includes('SSH 已连接')`);
+ await click('#header [data-action=servers]');await click('[data-action=server][data-id=sftp]');
+ await check('SFTP opens under services',`s.tab==='services'&&s.route==='sftp'`);
+ await run(`window.goBack()`);await new Promise(r=>setTimeout(r,100));
+ await check('Back from service returns to service list',`s.tab==='services'&&s.route==='servers'`);
+ await click('[data-tab=connect]');await click('#header [data-action=pair]');
+ await check('Connection add opens pairing dialog',`!document.querySelector('#modal').hidden&&document.querySelector('#modal input[name=uri]')!==null`);
+ await run(`window.goBack();await pair('fixture://new')`);
+ await check('New pairing automatically opens Codex',`s.tab==='codex'&&s.device.hostId==='pc-c'&&s.boot.devices.length===3`);
+ await click('[data-tab=connect]');await click('[data-action=deviceMenu][data-id=pc-c]');await run(`document.querySelector('[name=name]').value='重新命名的电脑'`);await click('[data-modal="2"]');
+ await check('Device rename remains available in connections',`document.querySelector('#page').textContent.includes('重新命名的电脑')`);
+ await click('[data-action=deviceMenu][data-id=pc-c]');await click('[data-modal="1"]');await click('[data-modal="1"]');
+ await check('Removing selected pairing clears active computer',`s.device===null&&s.thread===null&&!s.connected&&s.boot.devices.length===2`);
+ await click('[data-tab=codex]');
+ await check('No selected computer returns to Codex connection action',`s.route==='home'&&document.querySelector('#page [data-action=devices]')!==null`);
+ await fs.writeFile('Build/navigation-ui-results.json',JSON.stringify(checks,null,2));
+ await cmd('Browser.close').catch(()=>{});
+}finally{ws?.close();chrome.kill();server.close();}

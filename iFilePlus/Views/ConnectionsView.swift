@@ -14,8 +14,15 @@ struct ConnectionsView: View {
     private var visible: [ServerConnection] { store.connections.filter { $0.type != .ftp } }
     var body: some View {
         List {
+            Section {
+                NavigationLink {
+                    FileBrowserView(directory: LocalFileService.documentsDirectory, isRoot: true)
+                } label: {
+                    Label("文件管理器", systemImage: "folder.fill")
+                }
+            }
             if !visible.isEmpty {
-                Section("服务器") {
+                Section("服务器服务") {
                     ForEach(visible) { connection in
                         if connection.type == .sftp {
                             NavigationLink { RemoteBrowserView(connection: connection) } label: { serverLabel(connection) }
@@ -26,12 +33,14 @@ struct ConnectionsView: View {
                         }
                     }
                 }
+            } else {
+                Section("服务器服务") { Text("点击右上角 + 添加 SSH、SFTP 或 OpenClaw 服务。").foregroundStyle(.secondary) }
             }
         }
-        .navigationTitle("远程连接")
+        .navigationTitle("服务")
         .toolbar { ToolbarItem(placement: .topBarTrailing) {
             Menu { ForEach(ConnectionAddKind.allCases) { kind in Button("添加 " + kind.rawValue) { adding = kind } } }
-            label: { Image(systemName: "plus.circle.fill").font(.title2) }
+            label: { Image(systemName: "plus.circle.fill").font(.title2) }.accessibilityLabel("添加服务")
         } }
         .sheet(item: $adding) { kind in NavigationStack { ConnectionEditorView(defaultType: kind == .sftp ? .sftp : .ssh, openClawSetup: kind == .openClaw) } }
         .sheet(item: $editing) { connection in NavigationStack { ConnectionEditorView(connection: connection) } }

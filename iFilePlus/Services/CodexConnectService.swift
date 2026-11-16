@@ -43,7 +43,7 @@ extension Data {
     init() {
         if let data = UserDefaults.standard.data(forKey: "codex.devices.v1"), let saved = try? JSONDecoder().decode([CodexDevice].self, from: data) { devices = saved }
     }
-    func add(_ uri: String) throws {
+    @discardableResult func add(_ uri: String) throws -> CodexDevice {
         guard let url = URLComponents(string: uri.trimmingCharacters(in: .whitespacesAndNewlines)), url.scheme == "ifilecodex", url.host == "pair",
               let encoded = url.queryItems?.first(where: { $0.name == "data" })?.value,
               let data = Data(codexBase64URL: encoded), data.count < 8192 else { throw CodexConnectError(message: "请扫描电脑连接程序生成的二维码，或粘贴完整配对链接。") }
@@ -59,6 +59,7 @@ extension Data {
         device.alias = devices.first(where: { $0.id == device.id })?.alias
         device.pairToken = nil; device.expires = nil
         devices.removeAll { $0.id == device.id }; devices.append(device); save()
+        return device
     }
     func remove(_ device: CodexDevice) {
         CodexConnectService.remove(device.id); devices.removeAll { $0.id == device.id }; KeychainStore.delete(account: "codex.pair." + device.id); save()

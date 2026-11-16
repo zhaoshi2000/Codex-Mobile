@@ -21,7 +21,7 @@ struct CodexDownloadCard: View {
                         Button("取消") { service.cancelDownload() }.font(.caption).disabled(state.phase == .cancelling)
                     }
                 } else if state.phase == .saved, let file = state.file {
-                    Text("已保存到：文件 → Codex 下载").font(.caption).foregroundStyle(.secondary)
+                    Text("已保存到：服务 → 文件管理器 → Codex 下载").font(.caption).foregroundStyle(.secondary)
                     ShareLink(item: file) { Label("分享 / 导出", systemImage: "square.and.arrow.up") }
                         .font(.subheadline)
                 } else if let error = state.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
