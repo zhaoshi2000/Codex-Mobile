@@ -2,6 +2,129 @@ import XCTest
 @testable import FileServices
 
 final class FileServicesTests: XCTestCase {
+    func testPreviewCacheReopensOriginalAndSurvivesNewCacheInstance() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("codex-preview-test/photo.jpg")
+        try FileManager.default.createDirectory(at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("full image".utf8).write(to: source)
+        let directory = root.appendingPathComponent("cache")
+        let cache = CodexPreviewCache(directory: directory)
+        let first = try await cache.file(for: "host/thread/photo") { source }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        async let second = cache.file(for: "host/thread/photo") { throw NSError(domain: "must not download", code: 1) }
+        async let third = cache.file(for: "host/thread/photo") { throw NSError(domain: "must not download", code: 1) }
+        let hits = try await [second, third]
+        XCTAssertEqual(hits, [first, first])
+        let reopened = CodexPreviewCache(directory: directory)
+        let fourth = try await reopened.file(for: "host/thread/photo") { throw NSError(domain: "must not download", code: 1) }
+        XCTAssertEqual(try Data(contentsOf: fourth), Data("full image".utf8))
+    }
+
+    func testPreviewConcurrentLoadsReturnPersistentFile() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("codex-preview-test/photo.jpg")
+        try FileManager.default.createDirectory(at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("original".utf8).write(to: source)
+        let cache = CodexPreviewCache(directory: root.appendingPathComponent("cache"))
+        let loader: @Sendable () async throws -> URL = {
+            try await Task.sleep(nanoseconds: 30_000_000)
+            return source
+        }
+        async let first = cache.file(for: "same", load: loader)
+        async let second = cache.file(for: "same", load: loader)
+        let files = try await [first, second]
+        XCTAssertEqual(files[0], files[1])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: files[1].path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+    }
+
+    func testPreviewSuspendsFollowingAcrossDownloadAndDismissal() {
+        var scroll = CodexChatScrollState()
+        scroll.pause()
+        scroll.measure(0)
+        scroll.measure(1000)
+        XCTAssertFalse(scroll.shouldFollow)
+        scroll.resume()
+        XCTAssertTrue(scroll.shouldFollow)
+    }
+
+    func testLocalDictationKeepsUtterancesAcrossPausesAndEmptyFinal() {
+        var speech = CodexDictationSession()
+        let id = speech.begin()
+        speech.recognize("前面的话", start: 0.2, end: 1.5, settled: true, session: id)
+        speech.recognize("后面的花", start: 4, end: 5, settled: false, session: id)
+        speech.recognize("后面的话", start: 4, end: 5.2, settled: true, session: id)
+        speech.recognize("第三段", start: 9, end: 10, settled: true, session: id)
+        speech.recognize("", start: nil, end: nil, settled: true, session: id)
+        XCTAssertEqual(speech.commit(session: id), "前面的话\n后面的话\n第三段")
+        XCTAssertNil(speech.commit(session: id))
+    }
+
+    func testLocalDictationCumulativeRevisionDoesNotDuplicateUtterances() {
+        var speech = CodexDictationSession()
+        let id = speech.begin()
+        speech.recognize("我要看看", start: 0.2, end: 1, settled: true, session: id)
+        speech.recognize("CPU", start: 3, end: 4, settled: true, session: id)
+        speech.recognize("我要看看 CPU 的速度。", start: 0.2, end: 5, settled: true, session: id)
+        XCTAssertEqual(speech.text, "我要看看 CPU 的速度。")
+        speech.recognize("我要看看 CPU 的速度。", start: 0.2, end: 5, settled: true, session: id)
+        XCTAssertEqual(speech.text, "我要看看 CPU 的速度。")
+    }
+
+    func testLocalDictationSameWordsAfterSilenceAreNotDeduplicated() {
+        var speech = CodexDictationSession()
+        let id = speech.begin()
+        speech.recognize("你好", start: 0.2, end: 1, settled: true, session: id)
+        speech.recognize("你好", start: 0, end: 0, settled: false, session: id)
+        speech.recognize("你好", start: 4, end: 5, settled: true, session: id)
+        XCTAssertEqual(speech.text, "你好\n你好")
+    }
+
+    func testLocalDictationUntimedPartialAndRepeatedSpeech() {
+        var speech = CodexDictationSession()
+        let id = speech.begin()
+        speech.recognize("看看", start: 0, end: 0, settled: false, session: id)
+        speech.recognize("看看", start: 0.2, end: 1, settled: true, session: id)
+        speech.recognize("下一", start: 0, end: 0, settled: false, session: id)
+        speech.recognize("下一段", start: 0, end: 0, settled: false, session: id)
+        speech.recognize("下一段", start: 4, end: 5, settled: true, session: id)
+        speech.recognize("看看", start: 7, end: 8, settled: true, session: id)
+        XCTAssertEqual(speech.text, "看看\n下一段\n看看")
+        speech.cancel()
+        let next = speech.begin()
+        speech.recognize("旧内容", start: 9, end: 10, settled: true, session: id)
+        speech.recognize("新录音", start: 0, end: 1, settled: true, session: next)
+        XCTAssertEqual(speech.commit(session: next), "新录音")
+    }
+
+    func testChatLayoutGrowthDoesNotDisableFollowingLatest() {
+        var scroll = CodexChatScrollState()
+        scroll.measure(0)
+        scroll.measure(900) // History, image or keyboard changed the layout.
+        XCTAssertTrue(scroll.shouldFollow)
+        scroll.measure(0)
+        scroll.interaction(true)
+        scroll.measure(500)
+        XCTAssertFalse(scroll.shouldFollow)
+        scroll.interaction(false)
+        scroll.measure(1200) // An update while reading old messages must not pull us down.
+        XCTAssertFalse(scroll.shouldFollow)
+        scroll.resume()
+        XCTAssertTrue(scroll.shouldFollow)
+    }
+
+    func testChatTouchCancelsFollowingUntilScrollSettlesAtBottom() {
+        var scroll = CodexChatScrollState()
+        scroll.interaction(true)
+        XCTAssertFalse(scroll.shouldFollow)
+        scroll.measure(1000)
+        scroll.measure(0) // User scrolls back down during deceleration.
+        scroll.interaction(false)
+        XCTAssertTrue(scroll.shouldFollow)
+    }
+
     func testDictationSnapshotsReplaceAndFinalCommitsOnce() {
         var speech = CodexDictationSession()
         let id = speech.begin()

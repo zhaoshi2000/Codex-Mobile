@@ -367,14 +367,13 @@ private struct CodexChatContent: View {
     @State private var navigationOpen = false
     @State private var modelsOpen = false
     @State private var preview: CodexPreviewFile?
-    @State private var previewTemporary: URL?
     @State private var previewLoading = false
     @State private var forkMessage: CodexChatMessage?
     @State private var forking = false
     @State private var bottomDistance: CGFloat = 0
     @State private var viewportHeight: CGFloat = 600
     @State private var initialScroll = false
-    @State private var followOutput = true
+    @State private var scrollState = CodexChatScrollState()
     @State private var bottomScrollTask: Task<Void, Never>?
     @State private var draft = ""
     @State private var sending = false
@@ -434,13 +433,21 @@ private struct CodexChatContent: View {
                         }
                         Color.clear.frame(height: 1).id("bottom")
                     }.padding()
-                    .background(GeometryReader { content in Color.clear.preference(key: CodexChatBottomKey.self, value: content.frame(in: .named("codex-chat-scroll")).maxY) })
+                    .onGeometryChange(for: CGFloat.self) { content in
+                        content.frame(in: .named("codex-chat-scroll")).maxY
+                    } action: { bottom in
+                        if #available(iOS 18.0, *) { } else {
+                            measureBottom(max(0, bottom - viewport.size.height), proxy: proxy)
+                        }
+                    }
                 }
-                .defaultScrollAnchor(.bottom)
+                .modifier(CodexChatScrollInteraction(changed: { active in
+                    scrollState.interaction(active)
+                    if active { bottomScrollTask?.cancel() }
+                }, measured: { measureBottom($0, proxy: proxy) }))
                 .coordinateSpace(name: "codex-chat-scroll")
                 .onAppear { viewportHeight = viewport.size.height }
                 .onChange(of: viewport.size.height) { _, height in viewportHeight = height; scrollToLatest(proxy) }
-                .onPreferenceChange(CodexChatBottomKey.self) { bottom in bottomDistance = max(0, bottom - viewport.size.height); followOutput = bottomDistance < 140 }
                 .onChange(of: service.messages.last?.text) { _, _ in
                     scrollToLatest(proxy)
                 }
@@ -450,7 +457,7 @@ private struct CodexChatContent: View {
                     if bottomDistance > max(600, viewportHeight * 1.25) || browsingOlder {
                         Button { Task {
                             if browsingOlder { browsingOlder = false; await service.select(thread.id) }
-                            followOutput = true
+                            scrollState.resume()
                             withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
                         } } label: { Image(systemName: "arrow.down").font(.headline).padding(14).background(.regularMaterial, in: Circle()).shadow(radius: 3) }.padding(16).accessibilityLabel("回到底部")
                     }
@@ -462,7 +469,6 @@ private struct CodexChatContent: View {
             CodexDownloadCard(service: service).padding(.horizontal)
             if let notice = (service.running ? nil : service.notice) { Text(notice).font(.caption).foregroundStyle(.secondary).padding(.horizontal) }
             if loadingPhoto { ProgressView("正在读取照片…").padding(.horizontal) }
-            if previewLoading { ProgressView("正在读取预览…").padding(.horizontal) }
             if forking { ProgressView("正在创建分支…").padding(.horizontal) }
             if let progress = service.uploadProgress { ProgressView("上传附件", value: progress).padding(.horizontal) }
             if !attachments.isEmpty {
@@ -513,6 +519,12 @@ private struct CodexChatContent: View {
         }
         .accessibilityHidden(navigationOpen)
         .overlay { chatNavigationOverlay }
+        .overlay {
+            if previewLoading {
+                ProgressView("正在读取图片…").padding(18)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            }
+        }
         .navigationTitle(service.title(for: thread)).navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
@@ -566,13 +578,20 @@ private struct CodexChatContent: View {
             Button("取消", role: .cancel) { pendingDownload = nil }
         } message: { Text(pendingDownload ?? "") }
     }
+    private func measureBottom(_ distance: CGFloat, proxy: ScrollViewProxy) {
+        bottomDistance = distance
+        scrollState.measure(Double(distance))
+        // The bottom marker sits inside the stack's 16-point padding.
+        if distance > 18 { scrollToLatest(proxy) }
+    }
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
-        guard !browsingOlder, preview == nil, followOutput || !initialScroll else { return }
+        guard !browsingOlder, !previewLoading, preview == nil, !service.messages.isEmpty,
+              !scrollState.interacting, scrollState.shouldFollow || !initialScroll else { return }
         initialScroll = true
         bottomScrollTask?.cancel()
         bottomScrollTask = Task { @MainActor in
             await Task.yield()
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, scrollState.shouldFollow, !browsingOlder, !previewLoading, preview == nil else { return }
             proxy.scrollTo("bottom", anchor: .bottom)
         }
     }
@@ -621,15 +640,19 @@ private struct CodexChatContent: View {
 
     private var draftAccount: String { "codex.draft." + service.device.id + "." + thread.id }
     private func cleanPreview() {
-        if let file = previewTemporary { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()); previewTemporary = nil }
+        bottomScrollTask?.cancel()
+        // Viewing a photo is reading history, not a request to jump to new output.
+        scrollState.pause()
     }
     private func openPCFile(_ path: String) {
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
         if ["jpg", "jpeg", "png", "heic", "gif", "webp", "pdf"].contains(ext) {
-            guard !previewLoading else { return }; previewLoading = true
+            guard !previewLoading else { return }
+            scrollState.pause(); bottomScrollTask?.cancel(); previewLoading = true
             Task { defer { previewLoading = false }; do {
-                let file = try await service.download(projectID: "thread:" + thread.id, path: path, absolute: true, preview: true)
-                previewTemporary = file; preview = CodexPreviewFile(url: file)
+                let file = try await service.previewFile(path, threadID: thread.id)
+                guard service.selectedThread == thread.id else { return }
+                preview = CodexPreviewFile(url: file)
             } catch { service.error = error.localizedDescription } }
         } else { pendingDownload = path }
     }
@@ -656,7 +679,7 @@ private struct CodexChatContent: View {
         try KeychainStore.set(String(decoding: data, as: UTF8.self), account: pendingAccount)
     }
     private func send() async {
-        sending = true; service.notice = nil; followOutput = true; defer { sending = false }
+        sending = true; service.notice = nil; scrollState.resume(); defer { sending = false }
         if pendingID == nil { pendingID = UUID().uuidString; pendingText = draft }
         let id = pendingID!
         if !service.running { service.showOutgoing(pendingText ?? draft, to: thread.id, messageID: id, names: attachments.map(\.lastPathComponent)) }

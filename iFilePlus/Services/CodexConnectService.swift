@@ -473,6 +473,12 @@ extension Data {
         }
     }
     private func thumbnailKey(_ path: String, threadID: String) -> String { device.hostKey + "\n" + threadID + "\n" + path }
+    func previewFile(_ path: String, threadID: String) async throws -> URL {
+        let key = thumbnailKey(path, threadID: threadID)
+        return try await CodexPreviewCache.shared.file(for: key) {
+            try await self.download(projectID: "thread:" + threadID, path: path, absolute: true, preview: true)
+        }
+    }
     func cachedThumbnail(_ path: String, threadID: String) -> UIImage? { imageCache.object(forKey: thumbnailKey(path, threadID: threadID) as NSString) }
     private func loadThumbnailData(_ path: String, threadID: String) async throws -> Data {
         let result = try await request("imageThumbnail", ["projectId": "thread:" + threadID, "absolutePath": path])

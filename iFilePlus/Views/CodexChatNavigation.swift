@@ -47,7 +47,7 @@ import ImageIO
 struct CodexDownloadCard: View {
     @ObservedObject var service: CodexConnectService
     var body: some View {
-        if let state = service.downloadState, !state.preview || state.active {
+        if let state = service.downloadState, !state.preview {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Label(state.title, systemImage: state.phase == .saved ? "checkmark.circle.fill" : state.phase == .failed ? "exclamationmark.circle.fill" : "arrow.down.circle")
@@ -152,6 +152,7 @@ struct CodexChatGroupView: View {
     let openFile: (String) -> Void
     let fork: (CodexChatMessage) -> Void
     @State private var copied = false
+    @State private var showingUsage = false
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(group.blocks) { block in
@@ -180,16 +181,50 @@ struct CodexChatGroupView: View {
                 }
             }
             if let reply = group.reply {
-                HStack(spacing: 18) {
-                    Button { UIPasteboard.general.string = group.text; copied = true } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc") }.accessibilityLabel("复制本轮回复")
-                    if reply.turnID != nil { Button { fork(reply) } label: { Image(systemName: "arrow.triangle.branch") }.accessibilityLabel("创建分支").disabled(forking || !service.connected) }
+                HStack(spacing: 4) {
+                    Button { UIPasteboard.general.string = group.text; copied = true } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc").frame(width: 36, height: 40) }.accessibilityLabel("复制本轮回复")
+                    ShareLink(item: group.text) { Image(systemName: "square.and.arrow.up").frame(width: 36, height: 40) }.accessibilityLabel("分享本轮回复")
+                    if reply.turnID != nil { Button { fork(reply) } label: { Image(systemName: "arrow.triangle.branch").frame(width: 36, height: 40) }.accessibilityLabel("创建分支").disabled(forking || !service.connected) }
+                    Button { showingUsage = true } label: {
+                        Label(reply.tokenCount.map { "用量 " + $0.formatted(.number.notation(.compactName)) + " tok" } ?? "用量 —", systemImage: "cylinder")
+                            .font(.system(size: 11)).lineLimit(1).padding(.horizontal, 4).frame(minHeight: 40)
+                    }.accessibilityLabel("查看本轮用量")
                     if let completedAt = reply.completedAt, completedAt > 0 {
                         Text(Date(timeIntervalSince1970: completedAt / 1000), format: .dateTime.hour().minute())
-                            .monospacedDigit().accessibilityLabel("输出完成时间")
+                            .font(.system(size: 11)).monospacedDigit().padding(.leading, 4).accessibilityLabel("输出完成时间")
                     }
-                }.font(.caption).foregroundStyle(.secondary).padding(.top, 6)
+                }.font(.system(size: 13)).buttonStyle(.plain).foregroundStyle(.secondary).padding(.top, 2)
+                    .alert("本轮用量", isPresented: $showingUsage) {
+                        Button("知道了", role: .cancel) { }
+                    } message: {
+                        Text(reply.tokenCount.map { "电脑记录的本轮用量：\($0) tokens。" } ?? "电脑尚未提供这轮回复的 token 用量。这里不使用字数估算，也不把整段对话累计用量当作本轮用量。")
+                    }
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct CodexChatScrollInteraction: ViewModifier {
+    let changed: (Bool) -> Void
+    let measured: (CGFloat) -> Void
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geometry in
+                max(0, geometry.contentSize.height - geometry.visibleRect.maxY)
+            } action: { _, distance in measured(distance) }
+            .onScrollPhaseChange { old, new, context in
+                let wasUser = old == .tracking || old == .interacting || old == .decelerating
+                let isUser = new == .tracking || new == .interacting || new == .decelerating
+                if isUser { changed(true) }
+                if wasUser || isUser {
+                    measured(max(0, context.geometry.contentSize.height - context.geometry.visibleRect.maxY))
+                    if !isUser { changed(false) }
+                }
+            }
+        } else {
+            content.simultaneousGesture(DragGesture(minimumDistance: 8)
+                .onChanged { _ in changed(true) }.onEnded { _ in changed(false) })
+        }
     }
 }
 

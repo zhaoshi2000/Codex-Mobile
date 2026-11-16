@@ -1,5 +1,24 @@
 import Foundation
 
+/// Only a user's scroll changes follow intent. Layout, keyboard and history
+/// updates can move the measured bottom without the user leaving the latest reply.
+struct CodexChatScrollState {
+    private(set) var followsLatest = true
+    private(set) var interacting = false
+    private(set) var distance: Double = 0
+    mutating func measure(_ value: Double) {
+        distance = max(0, value)
+        if interacting { followsLatest = distance < 140 }
+    }
+    mutating func interaction(_ active: Bool) {
+        interacting = active
+        if !active { followsLatest = distance < 140 }
+    }
+    mutating func resume() { followsLatest = true }
+    mutating func pause() { followsLatest = false }
+    var shouldFollow: Bool { followsLatest && !interacting }
+}
+
 struct CodexChatMessage: Identifiable {
     let id: String
     let role: String
@@ -10,11 +29,12 @@ struct CodexChatMessage: Identifiable {
     let provisional: Bool
     let startedAt: Double?
     let toolStatus: String?
+    let tokenCount: Int?
     var completedAt: Double?
     var delivery: String?
     init(id: String, text: String, delivery: String) {
         self.id = id; self.role = "user"; self.text = text; self.truncated = false
-        self.turnID = nil; self.clientMessageID = id; self.provisional = true; self.delivery = delivery; startedAt = nil; toolStatus = nil; completedAt = nil
+        self.turnID = nil; self.clientMessageID = id; self.provisional = true; self.delivery = delivery; startedAt = nil; toolStatus = nil; completedAt = nil; tokenCount = nil
     }
     init?(_ json: [String: Any]) {
         guard let id = json["id"] as? String, let text = json["text"] as? String else { return nil }
@@ -24,6 +44,7 @@ struct CodexChatMessage: Identifiable {
         clientMessageID = json["clientMessageId"] as? String; provisional = json["provisional"] as? Bool ?? false; delivery = nil
         completedAt = (json["completedAtMs"] as? NSNumber)?.doubleValue
         startedAt = (json["startedAtMs"] as? NSNumber)?.doubleValue; toolStatus = json["toolStatus"] as? String
+        tokenCount = (json["tokenCount"] as? Int).flatMap { $0 >= 0 ? $0 : nil }
     }
 }
 

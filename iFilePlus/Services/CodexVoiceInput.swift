@@ -150,12 +150,16 @@ private final class CodexVoicePCM: @unchecked Sendable {
             deliver = onText; localRecognizer = recognizer; localRequest = request
             localTask = recognizer.recognitionTask(with: request) { [weak self] result, failure in
                 let snapshot = result?.bestTranscription.formattedString
+                let segments = result?.bestTranscription.segments
+                let speechStart = segments?.first?.timestamp
+                let speechEnd = segments?.last.map { $0.timestamp + $0.duration }
+                let settled = result?.speechRecognitionMetadata != nil
                 let isFinal = result?.isFinal ?? false
                 let failed = failure != nil
                 Task { @MainActor [weak self] in
                     guard let self, token == self.generation, !self.transcript.closed else { return }
                     if let snapshot, !snapshot.isEmpty || self.partial.isEmpty {
-                        self.transcript.replace(snapshot, session: recognitionID)
+                        self.transcript.recognize(snapshot, start: speechStart, end: speechEnd, settled: settled, session: recognitionID)
                         self.partial = self.transcript.text
                     }
                     if isFinal { self.complete() }
