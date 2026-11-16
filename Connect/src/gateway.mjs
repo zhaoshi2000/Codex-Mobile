@@ -9,7 +9,7 @@ import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { scopedPath, saveJSON, readJSON } from "./storage.mjs";
-import { messages, applyChange, desktopTurns, progress } from "./timeline.mjs";
+import { messages, applyChange, desktopTurns, progress, turnOutcome } from "./timeline.mjs";
 import { Uploads } from "./uploads.mjs";
 import { DesktopActivity } from "./activity.mjs";
 import { DesktopCatalog } from "./catalog.mjs";
@@ -137,7 +137,40 @@ export class Gateway {
       if (!next || next === previous || chatCount >= 50) break;
       limit = Math.min(50, 50 - chatCount);
     }
-    return { messages: result, nextCursor: next };
+    let outcome;
+    // Persisted item pages omit terminal errors; they live on the turn itself.
+    // Fetch bounded turn metadata until the oldest visible turn, not the entire thread.
+    try {
+      const metadata = [], oldest = result[0]?.turnId;
+      let turnCursor;
+      for (let page = 0; page < 3; page++) {
+        const r = await this.rpc.call("thread/turns/list", {threadId, limit: 100, sortDirection: "desc", ...(turnCursor ? {cursor: turnCursor} : {})});
+        metadata.push(...(r.data || []));
+        if (!oldest || metadata.some(t => (t.id || t.turnId) === oldest) || !r.nextCursor || r.nextCursor === turnCursor) break;
+        turnCursor = r.nextCursor;
+      }
+      if (!cursor) outcome = turnOutcome(metadata[0]);
+      const oldestIndex = metadata.findIndex(t => (t.id || t.turnId) === oldest);
+      const visible = new Set(result.map(m => m.turnId));
+      for (let index = Math.min(oldestIndex < 0 ? metadata.length - 1 : oldestIndex, metadata.length - 1); index >= 0; index--) {
+        const turn = metadata[index], id = turn.id || turn.turnId;
+        if (turn.status !== "failed" || (!visible.has(id) && (cursor || oldestIndex < 0))) continue;
+        const row = messages([{id, status: turn.status, error: turn.error, items: []}])[0];
+        if (!row || result.some(m => m.id === row.id)) continue;
+        const end = result.findLastIndex(m => m.turnId === id);
+        if (end >= 0) result.splice(end + 1, 0, row);
+        else {
+          const newer = new Set(metadata.slice(0, index).map(t => t.id || t.turnId));
+          const nextIndex = result.findIndex(m => newer.has(m.turnId));
+          result.splice(nextIndex < 0 ? result.length : nextIndex, 0, row);
+        }
+      }
+    } catch {}
+    // One stable error row per turn, even when the same error occurs in several item pages.
+    const seen = new Set();
+    result = result.slice().reverse().filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; }).reverse();
+    while (result.length && Buffer.byteLength(JSON.stringify(result)) > 230000) result.shift();
+    return { messages: result, nextCursor: next, ...(outcome ? {outcome} : {}) };
   }
   async downloadPath(p, project) {
     const requested = p.absolutePath ? localLinkPath(p.absolutePath) : path.resolve(project.path, project.relativePath || "");
@@ -297,7 +330,8 @@ export class Gateway {
         const data = await this.dispatch("models", { threadId: p.threadId }, peer);
         const model = data.models.find(m => m.id === p.model);
         if (!model) throw Error("此模型不在电脑当前提供商的列表中");
-        const effort = model.efforts.some(e => e.reasoningEffort === data.current.reasoningEffort) ? data.current.reasoningEffort : model.defaultEffort;
+        if (p.effort !== undefined && !model.efforts.some(e => e.reasoningEffort === p.effort)) throw Error("当前模型不支持此推理强度，请刷新模型列表");
+        const effort = p.effort ?? (model.efforts.some(e => e.reasoningEffort === data.current.reasoningEffort) ? data.current.reasoningEffort : model.defaultEffort);
         return { current: await this.ipc.setModel(p.threadId, model.id, effort) };
       }
       case "forkThread": return this.forkThread(p, peer);
@@ -319,7 +353,7 @@ export class Gateway {
       case "uploadChunk": return this.uploads.chunk(p, peer);
       case "uploadFinish": return this.uploads.finish(p, peer);
       case "uploadCancel": return this.uploads.cancel(p, peer);
-      case "completions": return { items: Object.entries(this.ledger).filter(([id, r]) => r.owner === peer.publicKey && r.completedAt && r.completedAt > Date.now() - 86400000).slice(-100).map(([id, r]) => ({ id, threadId: r.threadId, at: r.completedAt })) };
+      case "completions": return { items: Object.entries(this.ledger).filter(([id, r]) => r.owner === peer.publicKey && r.completedAt && r.completedAt > Date.now() - 86400000).slice(-100).map(([id, r]) => ({ id, threadId: r.threadId, at: r.completedAt, outcome: r.outcome || null })) };
       case "activity":
         if (!this.activity) throw new Error("请启用电脑本机目录模式");
         return { ...await this.activity.list(), ...this.badges(peer) };
@@ -734,8 +768,8 @@ export class Gateway {
       if (!turn) continue;
       if (!record.startedTurnId) { record.startedTurnId = turn.id || turn.turnId; changed = true; }
       if (["completed", "interrupted", "failed"].includes(turn.status)) {
-        record.completedAt = Date.now(); pending.delete(id); changed = true;
-        for (const sub of this.subscribers.values()) if (sub.peer.publicKey === record.owner) sub.peer.emit({ event: "completed", id, threadId });
+        record.completedAt = Date.now(); record.outcome = turnOutcome(turn); pending.delete(id); changed = true;
+        for (const sub of this.subscribers.values()) if (sub.peer.publicKey === record.owner) sub.peer.emit({ event: "completed", id, threadId, outcome: record.outcome });
       }
     }
     if (!pending.size) this.pendingQueued.delete(threadId);
@@ -806,6 +840,7 @@ export class Gateway {
           model: s.latestCollaborationMode?.settings?.model || s.latestModel || null,
           reasoningEffort: s.latestReasoningEffort || null,
           status: s.threadRuntimeStatus?.type || "unknown",
+          outcome: active || s.threadRuntimeStatus?.type === "active" ? null : turnOutcome(turns.at(-1)),
           turnId: active?.id || active?.turnId || null,
           awaitingApproval: (s.requests || []).some((r) => !r.completed && r.method !== "item/tool/requestUserInput"),
         };
@@ -813,11 +848,13 @@ export class Gateway {
           if (x.threadId === id) x.peer.emit(event);
         const monitor = this.monitors.get(id);
         if (monitor && (active || event.status === "active")) monitor.active = true;
-        if (monitor?.active && event.status === "idle") {
+        const lastTurn = turns.at(-1);
+        const fastFailure = monitor && event.outcome?.status === "failed" && lastTurn?.params?.clientUserMessageId === monitor.messageId;
+        if (monitor && (monitor.active || fastFailure) && event.status === "idle") {
           const record = this.ledger[monitor.messageId];
-          if (record) { record.completedAt = Date.now(); await this.saveLedger(); }
+          if (record) { record.completedAt = Date.now(); record.outcome = event.outcome; await this.saveLedger(); }
           this.monitors.delete(id);
-          for (const x of this.subscribers.values()) if (x.peer.publicKey === record?.owner) x.peer.emit({ event: "completed", id: monitor.messageId, threadId: id });
+          for (const x of this.subscribers.values()) if (x.peer.publicKey === record?.owner) x.peer.emit({ event: "completed", id: monitor.messageId, threadId: id, outcome: record.outcome });
           if (!this.pendingQueued.has(id) && !this.activity?.followed.has(id) && ![...this.subscribers.values()].some(x => x.threadId === id)) { this.ipc.follow(id, false); this.states.delete(id); }
         }
         if (event.status === "idle") {

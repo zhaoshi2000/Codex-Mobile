@@ -133,6 +133,9 @@ extension Data {
     @Published var currentModel = ""
     @Published var currentEffort = ""
     @Published var models: [CodexRow] = []
+    @Published var modelEfforts: [String: [String]] = [:]
+    @Published var modelDefaultEfforts: [String: String] = [:]
+    @Published var taskFailure: String?
     @Published var activityError: String?
     @Published var activityLimited = false
     private var checkingActivity = false
@@ -157,7 +160,7 @@ extension Data {
     private var generation = UUID()
     private var sent = 0
     private var received = 0
-    private var selectedThread: String?
+    private(set) var selectedThread: String?
     private var turnID: String?
     private var showingOlder = false
     private var reconnectTask: Task<Void, Never>?
@@ -312,7 +315,8 @@ extension Data {
             guard value["threadId"] as? String == selectedThread else { return }
             if !showingOlder { merge(value["messages"] as? [[String: Any]] ?? []) }
             running = value["status"] as? String == "active"; turnID = value["turnId"] as? String
-            if running { notice = nil }
+            if running { notice = nil; taskFailure = nil }
+            else { applyOutcome(value["outcome"] as? [String: Any]) }
             if let model = value["model"] as? String { currentModel = model }
             if let effort = value["reasoningEffort"] as? String { currentEffort = effort }
             approvalNeeded = value["awaitingApproval"] as? Bool ?? false
@@ -330,9 +334,10 @@ extension Data {
             if !showingOlder {
                 merge(value["messages"] as? [[String: Any]] ?? [], history: true)
                 olderCursor = value["nextCursor"] as? String
+                if !running { applyOutcome(value["outcome"] as? [String: Any]) }
             }
         case "completed":
-            if let id = value["id"] as? String { completion(id) }
+            if let id = value["id"] as? String { completion(id, threadID: value["threadId"] as? String, outcome: value["outcome"] as? [String: Any]) }
         case "notice": error = value["message"] as? String
         default: break
         }
@@ -375,6 +380,7 @@ extension Data {
         while messages.count > 200 || messages.reduce(0, { $0 + $1.text.utf8.count }) > 512000 { messages.removeFirst() }
     }
     func select(_ threadID: String, activate: Bool = true) async {
+        taskFailure = nil; modelEfforts = [:]; modelDefaultEfforts = [:]
         selection = UUID(); let token = selection
         writable = false
         if !connected { await connect(); if selectedThread == threadID { return } }
@@ -383,6 +389,7 @@ extension Data {
             let page = try await request("history", ["threadId": threadID])
             guard selectedThread == threadID, selection == token else { return }
             merge(page["messages"] as? [[String: Any]] ?? [], history: true); olderCursor = page["nextCursor"] as? String
+            applyOutcome(page["outcome"] as? [String: Any])
             var result = try await request("watch", ["threadId": threadID])
             if activate && result["writable"] as? Bool != true {
                 status = "正在打开电脑原对话…"
@@ -484,8 +491,23 @@ extension Data {
         if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].delivery = state }
     }
     func dismissOutgoing(_ id: String) { optimistic.removeValue(forKey: id); messages.removeAll { $0.id == id } }
-    private func completion(_ id: String) { if !running { notice = "Codex 处理完成" }; CodexNotifications.shared.completed(id: id, host: device.displayName) }
-    private func checkCompletions() async { if let r = try? await request("completions"), let items = r["items"] as? [[String: Any]] { for item in items { if let id = item["id"] as? String { completion(id) } } } }
+    private func applyOutcome(_ outcome: [String: Any]?) {
+        guard let outcome, let state = outcome["status"] as? String else { return }
+        if state == "failed" {
+            running = false; progressLabel = ""; progressSteps = []; approvalNeeded = false
+            taskFailure = outcome["message"] as? String ?? "本轮执行失败，请查看电脑提示。"; notice = nil
+        } else {
+            taskFailure = nil
+            if state == "interrupted" { notice = "本轮已停止" }
+            if state == "completed" { notice = "Codex 处理完成" }
+        }
+    }
+    private func completion(_ id: String, threadID: String?, outcome: [String: Any]?) {
+        let state = outcome?["status"] as? String ?? "unknown"
+        // Completion polls may contain older turns; only the timeline/history sets current chat status.
+        CodexNotifications.shared.completed(id: id, host: device.displayName, status: state, message: outcome?["message"] as? String)
+    }
+    private func checkCompletions() async { if let r = try? await request("completions"), let items = r["items"] as? [[String: Any]] { for item in items { if let id = item["id"] as? String { completion(id, threadID: item["threadId"] as? String, outcome: item["outcome"] as? [String: Any]) } } } }
     func upload(_ url: URL, threadID: String) async throws -> String {
         uploadProgress = 0; defer { uploadProgress = nil }
         let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
@@ -519,10 +541,18 @@ extension Data {
             let current = result["current"] as? [String: Any] ?? [:]
             currentModel = current["model"] as? String ?? ""; currentEffort = current["reasoningEffort"] as? String ?? ""
             models = (result["models"] as? [[String: Any]] ?? []).compactMap { m in guard let id = m["id"] as? String else { return nil }; return CodexRow(id: id, title: m["name"] as? String ?? id) }
+            modelEfforts = [:]; modelDefaultEfforts = [:]
+            for model in result["models"] as? [[String: Any]] ?? [] {
+                guard let id = model["id"] as? String else { continue }
+                modelEfforts[id] = (model["efforts"] as? [[String: Any]] ?? []).compactMap { $0["reasoningEffort"] as? String }
+                modelDefaultEfforts[id] = model["defaultEffort"] as? String
+            }
         } catch { self.error = error.localizedDescription }
     }
-    func chooseModel(_ model: String, threadID: String) async throws {
-        let result = try await request("setModel", ["threadId": threadID, "model": model])
+    func chooseModel(_ model: String, threadID: String, effort: String? = nil) async throws {
+        var params: [String: Any] = ["threadId": threadID, "model": model]
+        if let effort { params["effort"] = effort }
+        let result = try await request("setModel", params)
         guard selectedThread == threadID else { return }
         let current = result["current"] as? [String: Any] ?? [:]
         currentModel = current["model"] as? String ?? model; currentEffort = current["reasoningEffort"] as? String ?? ""

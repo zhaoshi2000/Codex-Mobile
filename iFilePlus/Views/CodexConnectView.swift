@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import PhotosUI
 import UniformTypeIdentifiers
 import ImageIO
@@ -360,6 +361,9 @@ private struct CodexChatContent: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var composerFocused: Bool
+    @StateObject private var voice = CodexVoiceRecorder()
+    @State private var voiceMode = false
+    @AppStorage("codex.voice.preferLocal.v1") private var preferLocalVoice = true
     @State private var navigationOpen = false
     @State private var modelsOpen = false
     @State private var preview: CodexPreviewFile?
@@ -398,6 +402,7 @@ private struct CodexChatContent: View {
                 if service.approvalNeeded { Label("有操作等待确认，请在电脑处理后继续。", systemImage: "hand.raised").font(.footnote).foregroundStyle(.orange) }
                 CodexQuotaButton(service: service)
                 if let error = service.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
+                if let failure = service.taskFailure { Text(failure).font(.caption).foregroundStyle(.red).lineLimit(4).textSelection(.enabled) }
                 if !service.writable {
                     Button("在电脑打开此对话") { Task { do { _ = try await service.request("activate", ["threadId": thread.id]); try? await Task.sleep(for: .seconds(2)); await service.select(thread.id) } catch { service.error = error.localizedDescription } } }
                         .font(.footnote).disabled(!service.connected)
@@ -463,16 +468,34 @@ private struct CodexChatContent: View {
                     }.padding(8).background(.secondary.opacity(0.12), in: Capsule())
                 } }.padding(.horizontal) }
             }
-            CodexVoiceInput(service: service, text: $draft, disabled: sending || uncertain).id(thread.id)
-            HStack(alignment: .bottom) {
+            if voiceMode || voice.error != nil { CodexVoicePreview(voice: voice, preferLocal: $preferLocalVoice) }
+            HStack(alignment: .bottom, spacing: 10) {
+                Button {
+                    voice.cancel()
+                    voiceMode.toggle()
+                    composerFocused = !voiceMode
+                } label: { Image(systemName: voiceMode ? "keyboard" : "waveform.circle").font(.title2).frame(minWidth: 32, minHeight: 46) }
+                    .accessibilityLabel(voiceMode ? "切换键盘输入" : "切换按住说话")
+                    .disabled(sending || uncertain)
+                if voiceMode {
+                    CodexHoldToTalk(voice: voice, service: service, preferLocal: preferLocalVoice,
+                                    disabled: sending || uncertain || (!preferLocalVoice && !service.connected)) { value in
+                        draft += (draft.isEmpty || draft.hasSuffix("\n") ? "" : "\n") + value
+                        voiceMode = false
+                        composerFocused = true
+                    }
+                } else {
+                    TextField("发给电脑上的 Codex…", text: $draft, axis: .vertical).lineLimit(1...6).textFieldStyle(.roundedBorder).focused($composerFocused).disabled(sending || uncertain)
+                }
                 Menu {
                     Button("选择文件", systemImage: "doc") { importing = true }
                     Button("选择照片", systemImage: "photo") { choosingPhoto = true }
-                } label: { Image(systemName: "plus.circle").font(.title2) }.disabled(sending || uncertain || loadingPhoto || attachments.count >= 6)
-                TextField("发给电脑上的 Codex…", text: $draft, axis: .vertical).lineLimit(1...6).textFieldStyle(.roundedBorder).focused($composerFocused).disabled(sending || uncertain)
+                } label: { Image(systemName: "plus.circle").font(.title2).frame(minHeight: 46) }.disabled(sending || uncertain || loadingPhoto || attachments.count >= 6 || voice.active)
                 if service.running { Button { Task { await service.stop(thread.id) } } label: { Image(systemName: "stop.circle.fill").font(.title2) }.accessibilityLabel("停止") }
-                Button { Task { await send() } } label: { if sending { ProgressView() } else { Image(systemName: uncertain ? "arrow.clockwise.circle.fill" : "arrow.up.circle.fill").font(.title) } }
-                    .disabled(sending || loadingPhoto || !service.connected || !service.writable || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty && uploadedIDs.isEmpty) || browsingOlder)
+                if !voiceMode {
+                    Button { Task { await send() } } label: { if sending { ProgressView() } else { Image(systemName: uncertain ? "arrow.clockwise.circle.fill" : "arrow.up.circle.fill").font(.title) } }
+                        .disabled(sending || loadingPhoto || !service.connected || !service.writable || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty && uploadedIDs.isEmpty) || browsingOlder)
+                }
             }.padding()
             if uncertain { Button("已核实，清除输入") { if let id = pendingID { service.dismissOutgoing(id) }; clearPending(); service.error = nil }.font(.caption).padding(.bottom, 6) }
         }
@@ -491,9 +514,7 @@ private struct CodexChatContent: View {
             ToolbarItem(placement: .topBarTrailing) { NavigationLink { CodexFilesView(service: service, project: CodexRow(id: "thread:" + thread.id, title: "对话文件"), path: "", title: "对话文件") } label: { Image(systemName: "folder") }.disabled(navigationOpen) }
         }
         .sheet(isPresented: $modelsOpen) { CodexModelPicker(service: service, threadID: thread.id) }
-        .sheet(item: $preview, onDismiss: {
-            if let file = previewTemporary { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()); previewTemporary = nil }
-        }) { file in NavigationStack { CodexFilePreview(url: file.url).ignoresSafeArea(edges: .bottom).navigationTitle(file.url.lastPathComponent).navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { preview = nil } } } } }
+        .modifier(CodexChatPreviewModifier(preview: $preview, onDismiss: cleanPreview))
         .alert("创建对话分支？", isPresented: Binding(get: { forkMessage != nil }, set: { if !$0 { forkMessage = nil } })) {
             Button("取消", role: .cancel) { forkMessage = nil }
             Button("创建分支") { if let message = forkMessage { Task { await fork(message) } }; forkMessage = nil }
@@ -504,7 +525,7 @@ private struct CodexChatContent: View {
                 pendingID = id; pendingText = text; draft = text; uncertain = true; uploadedIDs = value["attachments"] as? [String] ?? []
             }
             if let savedDraft = UserDefaults.standard.string(forKey: draftAccount), !uncertain { draft = savedDraft }
-            await service.select(thread.id)
+            if service.selectedThread != thread.id { await service.select(thread.id) }
             if service.writable { await service.refreshModels(thread.id) }
             while !Task.isCancelled {
                 if scenePhase == .active {
@@ -514,7 +535,14 @@ private struct CodexChatContent: View {
                 try? await Task.sleep(for: .seconds(4))
             }
         }
-        .onDisappear { UserDefaults.standard.set(draft, forKey: draftAccount); service.leaveChat(thread.id) }
+        .onDisappear {
+            voice.cancel(); UserDefaults.standard.set(draft, forKey: draftAccount)
+            // Opening the image modal must not clear the underlying chat or detach its stream.
+            if preview == nil { service.leaveChat(thread.id) }
+        }
+        .onChange(of: thread.id) { _, _ in voice.cancel(); voiceMode = false }
+        .onChange(of: scenePhase) { _, phase in if phase != .active && (voice.recording || voice.finishing) { voice.cancel() } }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { _ in voice.cancel() }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             do { for url in try result.get() { try addFile(url) } } catch { service.error = error.localizedDescription }
         }
@@ -569,6 +597,9 @@ private struct CodexChatContent: View {
     }
 
     private var draftAccount: String { "codex.draft." + service.device.id + "." + thread.id }
+    private func cleanPreview() {
+        if let file = previewTemporary { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()); previewTemporary = nil }
+    }
     private func openPCFile(_ path: String) {
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
         if ["jpg", "jpeg", "png", "heic", "gif", "webp", "pdf"].contains(ext) {

@@ -2,6 +2,30 @@ import XCTest
 @testable import FileServices
 
 final class FileServicesTests: XCTestCase {
+    func testDictationSnapshotsReplaceAndFinalCommitsOnce() {
+        var speech = CodexDictationSession()
+        let id = speech.begin()
+        speech.replace("我要", session: id)
+        speech.replace("我要看看 CPU", session: id)
+        speech.replace("我要看看 CPU 的速度。", session: id)
+        XCTAssertEqual(speech.commit(session: id), "我要看看 CPU 的速度。")
+        XCTAssertNil(speech.commit(session: id))
+        speech.replace("旧回调重复内容", session: id)
+        XCTAssertEqual(speech.text, "我要看看 CPU 的速度。")
+    }
+
+    func testCancelledDictationAndLateCallbacksCannotChangeNextRecording() {
+        var speech = CodexDictationSession()
+        let old = speech.begin()
+        speech.replace("不要发送", session: old)
+        speech.cancel()
+        XCTAssertNil(speech.commit(session: old))
+        let next = speech.begin()
+        speech.replace("新内容", session: next)
+        speech.replace("旧会话迟到的结果", session: old)
+        XCTAssertEqual(speech.commit(session: next), "新内容")
+    }
+
     @MainActor func testNavigationCacheReopenAndHeadRefreshRetainsOlderRows() async {
         var clock = Date(timeIntervalSince1970: 100)
         var requests: [String] = []

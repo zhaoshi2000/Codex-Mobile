@@ -64,6 +64,23 @@ function contentText(content) {
         .join("\n")
     : "";
 }
+export function taskError(error) {
+  if (!error) return null;
+  const raw = String(typeof error === "string" ? error : error.message || "").slice(0, 3000);
+  const info = error.codexErrorInfo || error.errorInfo;
+  const code = typeof info === "string" ? info : Object.keys(info || {})[0];
+  const quota = code === "usageLimitExceeded" || /usage limit|insufficient.quota|额度不足|使用上限/i.test(raw);
+  return { kind: quota ? "quota" : "error", message: (quota
+    ? "Codex 使用额度已达上限，本轮未完成。请等待额度重置，或在电脑端查看套餐与额度。"
+    : "本轮未完成：") + (raw ? "\n" + raw : "请在电脑查看详情后重试。") };
+}
+export function turnOutcome(turn) {
+  if (!turn) return null;
+  if (turn.status === "failed") return { status: "failed", ...taskError(turn.error || [...(turn.items || [])].reverse().find(i => i.type === "error" && !i.willRetry) || "任务执行失败") };
+  if (turn.status === "interrupted") return { status: "interrupted", message: "本轮已停止" };
+  if (turn.status === "completed") return { status: "completed" };
+  return null;
+}
 export function messages(turns, budget = 230000, includeCommands = false) {
   const out = [];
   let bytes = 0;
@@ -113,6 +130,10 @@ export function messages(turns, budget = 230000, includeCommands = false) {
         completedAtMs: type === "agentmessage" && i.phase === "final_answer" ? i.completedAtMs || null : null,
       });
     }
+    const failure = [...(turn.items || [])].reverse().find(i => i.type === "error" && !i.willRetry);
+    const error = taskError(turn.error || failure);
+    if (error) out.push({ id: (turn.id || turn.turnId) + ":error", role: "error", text: error.message,
+      turnId: turn.id || turn.turnId, startedAtMs: failure?.startedAtMs || null });
   }
   // Budget the actual response, not just the number of bubbles.
   let total = 0, chats = 0, tools = 0;

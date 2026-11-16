@@ -14,6 +14,8 @@ class Recognizer:
     def create_stream(self): return Stream()
     def is_ready(self, stream): return False
     def get_result(self, stream): return f"文字 {stream.count}"
+    def is_endpoint(self, stream): return False
+    def reset(self, stream): stream.count = 0
 
 
 class StreamingTests(unittest.TestCase):
@@ -51,6 +53,22 @@ class StreamingTests(unittest.TestCase):
         for change in [dict(audio='?'), dict(audio='AA=='), dict(sequence=True), dict(final='yes'),
                        dict(audio=base64.b64encode(bytes(64002)).decode())]:
             with self.assertRaises(HTTPException): self.worker.accept(dict(self.chunk, **change))
+
+    def test_endpoint_resets_once_and_partial_snapshots_do_not_append(self):
+        class EndpointRecognizer(Recognizer):
+            def is_endpoint(self, stream): return stream.count >= 3200
+            def get_result(self, stream): return '看看' if stream.count else ''
+        worker = Streams(EndpointRecognizer())
+        first = worker.accept(self.chunk)
+        self.assertEqual(first['text'], '看看')
+        boundary = dict(self.chunk, sequence=1)
+        result = worker.accept(boundary)
+        self.assertEqual(result['text'], '看看')
+        self.assertEqual(worker.accept(boundary), result)
+        self.assertEqual(len(worker.sessions[self.chunk['requestId']]['committed']), 1)
+        next_result = worker.accept(dict(self.chunk, sequence=2))
+        self.assertEqual(next_result['text'], '看看 看看')
+        self.assertEqual(worker.sessions[self.chunk['requestId']]['stream'].count, 1600)
 
     def test_capacity_and_duration_are_bounded(self):
         for n in range(4):

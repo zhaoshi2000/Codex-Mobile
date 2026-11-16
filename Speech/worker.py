@@ -50,7 +50,7 @@ class Streams:
                     raise HTTPException(409, 'session_expired')
                 if sum(v['stream'] is not None for v in self.sessions.values()) >= 4 or len(self.sessions) >= 64:
                     raise HTTPException(503, 'busy')
-                session = {'stream': self.recognizer.create_stream(), 'seq': -1, 'samples': 0, 'at': self.now()}
+                session = {'stream': self.recognizer.create_stream(), 'seq': -1, 'samples': 0, 'committed': [], 'at': self.now()}
                 self.sessions[ident] = session
             if sequence == session['seq']:
                 if digest != session['digest']:
@@ -68,7 +68,16 @@ class Streams:
                 stream.input_finished()
             while self.recognizer.is_ready(stream):
                 self.recognizer.decode_stream(stream)
-            result = {'text': self.recognizer.get_result(stream).strip(), 'sequence': sequence, 'final': final}
+            current = self.recognizer.get_result(stream).strip()
+            # Commit a pause-delimited utterance exactly once, then reset the
+            # decoder. Do not keep decoding a minute-long hypothesis or remove
+            # repeated words from the user's actual speech.
+            if not final and self.recognizer.is_endpoint(stream):
+                if current: session['committed'].append(current)
+                self.recognizer.reset(stream)
+                current = ''
+            text = ' '.join(session['committed'] + ([current] if current else []))
+            result = {'text': text, 'sequence': sequence, 'final': final}
             session.update(seq=sequence, samples=session['samples'] + len(audio) // 2,
                            at=self.now(), result=result, digest=digest)
             if final:
@@ -89,7 +98,9 @@ async def lifespan(app):
         tokens=str(root/'tokens.txt'), encoder=str(root/'encoder-epoch-99-avg-1.int8.onnx'),
         decoder=str(root/'decoder-epoch-99-avg-1.int8.onnx'), joiner=str(root/'joiner-epoch-99-avg-1.int8.onnx'),
         num_threads=int(os.environ.get('SPEECH_THREADS', '4')), sample_rate=16000, feature_dim=80,
-        decoding_method='greedy_search', enable_endpoint_detection=False, provider='cpu', model_type='zipformer')
+        decoding_method='modified_beam_search', max_active_paths=4, enable_endpoint_detection=True,
+        rule1_min_trailing_silence=2.4, rule2_min_trailing_silence=1.2, rule3_min_utterance_length=15,
+        provider='cpu', model_type='zipformer')
     streams = Streams(recognizer)
     async def cleanup():
         while True:
