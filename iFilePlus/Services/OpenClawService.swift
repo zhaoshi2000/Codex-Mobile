@@ -9,6 +9,7 @@ struct OpenClawSessionRow: Identifiable {
 
 @MainActor final class OpenClawService: ObservableObject {
     @Published var connected = false
+    @Published var sshConnected = false
     @Published var busy = false
     @Published var sending = false
     @Published var running = false
@@ -37,7 +38,7 @@ struct OpenClawSessionRow: Identifiable {
         guard !busy else { return }; busy = true; defer { busy = false }
         generation = UUID(); error = nil
         if let latest = store.connections.first(where: { $0.id == connection.id }) { connection = latest }
-        await ssh?.disconnect(); connected = false
+        await ssh?.disconnect(); connected = false; sshConnected = false
         do {
             if connection.trustedHostKey == nil {
                 let key = try await SSHService.discoverHostKey(host: connection.host, port: connection.port)
@@ -46,18 +47,19 @@ struct OpenClawSessionRow: Identifiable {
             let session = SSHSession()
             try await session.connect(connection: connection, password: store.password(for: connection.id) ?? "", privateKey: store.privateKey(for: connection.id), enableSFTP: false)
             ssh = session
+            sshConnected = true
             if let saved = KeychainStore.get(account: pendingAccount), let data = saved.data(using: .utf8), let p = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let id = p["id"] as? String, let text = p["text"] as? String, let key = p["session"] as? String {
                 requestID = id; pendingText = text; pendingSession = key; selected = key; uncertain = true; deliveryPending = true; baseline = Set(p["baseline"] as? [String] ?? [])
             }
             try await loadSessions(); connected = true; await refresh()
-        } catch { self.error = error.localizedDescription; await ssh?.disconnect(); ssh = nil }
+        } catch { self.error = error.localizedDescription }
     }
     func trust(store: ConnectionStore) async {
         guard let key = pendingKey else { return }; connection.trustedHostKey = key; store.update(connection); showTrust = false; await connect(store: store)
     }
     private func call(_ method: String, _ params: [String: Any]) async throws -> [String: Any] {
         guard let ssh else { throw OpenClawWireError.remote("SSH 尚未连接") }
-        let command = try OpenClawProtocol.command(executable: connection.openClawExecutable ?? "openclaw", container: connection.openClawContainer ?? "", method: method, params: params)
+        let command = try OpenClawProtocol.command(executable: connection.openClawExecutable ?? "openclaw", container: connection.openClawContainer ?? "", user: connection.openClawUser ?? "", method: method, params: params)
         return try OpenClawProtocol.decode(await ssh.execute(command))
     }
     func loadSessions() async throws {
@@ -114,5 +116,5 @@ struct OpenClawSessionRow: Identifiable {
     }
     func clearPending() { deliveryPending = false; requestID = nil; pendingText = nil; pendingSession = nil; uncertain = false; KeychainStore.delete(account: pendingAccount) }
     func stop() async { do { var p: [String: Any] = ["sessionKey": selected]; if let runID { p["runId"] = runID }; _ = try await call("chat.abort", p); await refresh() } catch { self.error = error.localizedDescription } }
-    func disconnect() async { generation = UUID(); connected = false; await ssh?.disconnect(); ssh = nil }
+    func disconnect() async { generation = UUID(); connected = false; sshConnected = false; await ssh?.disconnect(); ssh = nil }
 }

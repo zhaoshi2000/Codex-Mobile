@@ -131,6 +131,8 @@ function resetCodex() {
   s.threadCursor = null;
   s.progress = null;
   s.turnId = null;
+  s.quota = null;
+  s.quotaAt = 0;
   s.status = "";
   s.unread = [];
   s.runningProjects = [];
@@ -203,6 +205,7 @@ async function loadThreads(more = false) {
   s.runningProjects = nav.runningProjects || [];
   if (s.route === "threads") renderThreads();
   if (!$("#drawer").hidden) drawer();
+  safe(refreshQuota);
 }
 function threadRows(rows) {
   return rows.map((t) => `<div class="item"><button class="grow row" data-action="thread" data-id="${E(t.id)}"><span class="grow name">${E(t.title || "未命名对话")}<small>${E(t.projectName || "未分组")}</small></span>${s.tasks.some((a) => a.id === t.id || a.threadId === t.id) ? '<i class="dot green"></i>' : (s.unread || []).includes(t.id) ? '<i class="dot"></i>' : ""}</button>${btn("threadMenu", "more", "对话选项", `data-id="${E(t.id)}"`)}</div>`).join("");
@@ -215,7 +218,7 @@ function renderThreads() {
   if (s.tab !== "codex" || s.route !== "threads") return;
   tabs();
   header(s.navProject ? ((_a = s.projects.find((p) => p.id === s.navProject)) == null ? void 0 : _a.name) || "项目" : deviceName(s.device || {}), btn("devices", "back", "返回设备列表"), btn("newThread", "edit", "新建对话"));
-  showPage(`<div class="card row"><i class="dot green"></i><div>已连接 ${E(deviceName(s.device || {}))}<p class="hint">电脑本机记录 · 加密连接</p></div></div>${!s.navProject ? projectBlock() : ""}<div class="section">${s.navProject ? "项目对话" : "最近对话"}</div><div class="card list">${threadRows(s.threads)}</div>${s.threadCursor ? '<button data-action="moreThreads">查看更多</button>' : ""}${!s.threads.length ? empty("还没有对话", "点击右上角新建对话") : ""}`);
+  showPage(`<div class="card row"><i class="dot green"></i><div>已连接 ${E(deviceName(s.device || {}))}<p class="hint">电脑本机记录 · 加密连接</p></div></div><div data-quotabox>${quotaHTML()}</div>${!s.navProject ? projectBlock() : ""}<div class="section">${s.navProject ? "项目对话" : "最近对话"}</div><div class="card list">${threadRows(s.threads)}</div>${s.threadCursor ? '<button data-action="moreThreads">查看更多</button>' : ""}${!s.threads.length ? empty("还没有对话", "点击右上角新建对话") : ""}`);
 }
 function drawer() {
   const el = $("#drawer");
@@ -274,6 +277,37 @@ async function openThread(id) {
     }
   }
 }
+function quotaHTML() {
+  var _a, _b;
+  const q = (_b = (_a = s.quota) == null ? void 0 : _a.windows) == null ? void 0 : _b[0];
+  return `<button data-action="quota" style="font-size:12px" ${!s.connected ? "disabled" : ""}>${q ? E(q.label) + "剩余 " + Math.round(q.remainingPercent) + "%" : "Codex 剩余额度"} ›</button>`;
+}
+async function refreshQuota(force = false) {
+  var _a, _b, _c;
+  if (!s.connected || s.quotaLoading || !force && Date.now() - (s.quotaAt || 0) < 6e4) return;
+  s.quotaLoading = true;
+  const id = (_a = s.device) == null ? void 0 : _a.hostId;
+  try {
+    const q = await rpc("quota");
+    if (((_b = s.device) == null ? void 0 : _b.hostId) === id) {
+      s.quota = q;
+      s.quotaAt = Date.now();
+    }
+  } catch {
+    if (((_c = s.device) == null ? void 0 : _c.hostId) === id) {
+      s.quota = { windows: [], message: "无法读取 Codex 额度，请更新电脑连接程序后重试。" };
+      s.quotaAt = Date.now();
+    }
+  } finally {
+    s.quotaLoading = false;
+    document.querySelectorAll("[data-quotabox]").forEach((el) => el.innerHTML = quotaHTML());
+  }
+}
+async function showQuota() {
+  await refreshQuota(true);
+  const q = s.quota || {};
+  await modal("Codex 剩余额度", (q.windows || []).map((w) => `<div class="card"><strong>${E(w.label)} · 剩余 ${Math.round(w.remainingPercent)}%</strong><progress value="${w.remainingPercent}" max="100"></progress>${w.resetsAt ? '<p class="hint">重置时间：' + E(new Date(w.resetsAt * 1e3).toLocaleString()) + "</p>" : ""}</div>`).join("") || `<p>${E(q.message || "暂无额度数据")}</p>`, [["完成", false]]);
+}
 function renderStatus() {
   var _a;
   const el = $("#status");
@@ -325,7 +359,7 @@ function renderChat(bottom = false) {
   let previous = page.scrollTop, atBottom = page.scrollHeight - page.clientHeight - page.scrollTop < 120;
   const wasChat = page.classList.contains("chatpage");
   page.className = "chatpage";
-  page.innerHTML = `<div class="chatstatus" id="status"></div>${s.cursor ? '<button data-action="older">加载更早的消息</button>' : ""}<div class="messages">${messagesHTML()}</div><div id="questions"></div><div class="progressline">${s.busy ? '<i class="spinner"></i>' + E(((_b = s.progress) == null ? void 0 : _b.label) || "正在处理…") : s.messages.length ? "Codex 处理完成" : ""}</div>`;
+  page.innerHTML = `<div class="chatstatus" id="status"></div><div data-quotabox>${quotaHTML()}</div>${s.cursor ? '<button data-action="older">加载更早的消息</button>' : ""}<div class="messages">${messagesHTML()}</div><div id="questions"></div><div class="progressline">${s.busy ? '<i class="spinner"></i>' + E(((_b = s.progress) == null ? void 0 : _b.label) || "正在处理…") : s.messages.length ? "Codex 处理完成" : ""}</div>`;
   renderStatus();
   renderQuestions();
   renderComposer();
@@ -551,7 +585,7 @@ function renderServers() {
 }
 async function serverForm(id) {
   const d = s.boot.servers.find((x) => x.id === id) || {};
-  const result = await modal(id ? "编辑服务器" : "添加服务器", `${field("name", "名称", d.name)}<label>连接类型</label><select name="type">${[["ssh", "SSH 终端"], ["sftp", "SFTP 文件"], ["ftp", "FTP 文件（普通被动模式）"], ["openclaw", "OpenClaw 聊天"]].map(([v, l]) => `<option value="${v}" ${v === d.type ? "selected" : ""}>${l}</option>`).join("")}</select>${field("host", "服务器地址", d.host)}${field("port", "端口", d.port || 22, "number")}${field("username", "用户名", d.username || "root")}${field("password", id ? "密码（留空保留）" : "密码", "", "password")}${area("privateKey", id ? "SSH 私钥（留空保留）" : "SSH 私钥（可选，PEM 格式）")}${field("passphrase", "私钥口令（可选）", "", "password")}<p class="hint">SSH 私钥与 AI API Key 分开保存。普通 FTP 不加密传输。</p>${field("executable", "OpenClaw 命令或路径", d.executable || "openclaw")}${field("container", "Docker 容器名（可选）", d.container)}`);
+  const result = await modal(id ? "编辑服务器" : "添加服务器", `${field("name", "名称", d.name)}<label>连接类型</label><select name="type">${[["ssh", "SSH 终端"], ["sftp", "SFTP 文件"], ["ftp", "FTP 文件（普通被动模式）"], ["openclaw", "OpenClaw 聊天"]].map(([v, l]) => `<option value="${v}" ${v === d.type ? "selected" : ""}>${l}</option>`).join("")}</select>${field("host", "服务器地址", d.host)}${field("port", "端口", d.port || 22, "number")}${field("username", "用户名", d.username || "root")}${field("password", id ? "密码（留空保留）" : "密码", "", "password")}${area("privateKey", id ? "SSH 私钥（留空保留）" : "SSH 私钥（可选，PEM 格式）")}${field("passphrase", "私钥口令（可选）", "", "password")}<p class="hint">SSH 私钥与 AI API Key 分开保存。普通 FTP 不加密传输。</p>${field("executable", "OpenClaw 命令或路径", d.executable || "openclaw")}${field("runUser", "OpenClaw 运行用户（留空自动识别）", d.runUser)}${field("container", "Docker 容器名（可选）", d.container)}`);
   if (!result) return;
   result.port = Number(result.port);
   if (id) result.id = id;
@@ -714,14 +748,19 @@ async function aiSend() {
   }
 }
 async function loadClawSessions() {
-  const r = await serverCall("openclaw", { id: s.server.id, method: "sessions.list", params: { limit: 100 } });
-  s.clawSessions = r.sessions || [];
-  renderClaw();
+  s.clawError = "";
+  try {
+    const r = await serverCall("openclaw", { id: s.server.id, method: "sessions.list", params: { limit: 100 } });
+    s.clawSessions = r.sessions || [];
+  } catch (e) {
+    s.clawError = e.message;
+  }
+  if (s.tab === "services" && s.route === "claw") renderClaw();
 }
 function renderClaw() {
-  header(s.clawSession ? "OpenClaw · " + s.clawSession : "OpenClaw", btn("servers", "back", "返回服务"), btn("clawNew", "plus", "新会话"));
+  header(s.clawSession ? "OpenClaw · " + s.clawSession : "OpenClaw", btn("servers", "back", "返回服务"), btn("clawTerminal", "codex", "SSH 终端") + btn("clawNew", "plus", "新会话"));
   if (!s.clawSession) {
-    showPage(`<p class="hint">${E(s.server.name || s.server.host)} · 选择服务器上的会话</p><div class="card list">${(s.clawSessions || []).map((x) => `<button class="item" data-action="clawSession" data-key="${E(x.key)}">${icon("codex")}<span class="grow name">${E(x.displayName || x.label || x.key)}</span></button>`).join("")}</div><button data-action="clawRefresh">刷新会话</button>`);
+    showPage(`<p class="hint">${E(s.server.name || s.server.host)} · 选择服务器上的会话</p>${s.clawError ? `<p class="error">${E(s.clawError)}</p>` : ""}<div class="card list">${(s.clawSessions || []).map((x) => `<button class="item" data-action="clawSession" data-key="${E(x.key)}">${icon("codex")}<span class="grow name">${E(x.displayName || x.label || x.key)}</span></button>`).join("")}</div><button data-action="clawRefresh">刷新会话</button>`);
     return;
   }
   showPage(`<div id="clawHistory">${(s.clawMessages || []).map((m) => `<article class="message ${m.role === "user" ? "user" : ""}"><div class="${m.role === "user" ? "bubble" : ""}">${markdown(typeof m.content === "string" ? m.content : (m.content || []).filter((x) => x.type === "text").map((x) => x.text).join("\n"))}</div></article>`).join("")}</div><div class="card">${area("clawInput", "发送消息")}<div class="row"><button class="primary" data-action="clawSend">发送</button><button data-action="clawHistory">刷新</button><button data-action="clawStop">停止</button></div></div>`);
@@ -1002,6 +1041,9 @@ async function action(a, b) {
     case "stop":
       await rpc("stop", { threadId: s.thread.id, turnId: s.turnId });
       break;
+    case "quota":
+      await showQuota();
+      break;
     case "models": {
       const r = await rpc("models", { threadId: s.thread.id });
       const v = await modal("选择模型", `<select name="model">${r.models.map((m) => `<option value="${E(m.id)}" ${m.id === s.model ? "selected" : ""}>${E(m.name || m.id)}</option>`).join("")}</select>`);
@@ -1213,6 +1255,12 @@ async function action(a, b) {
     case "projectSite":
       await call("browser", { url: "https://github.com/zhaoshi2000/Codex-Mobile" });
       break;
+    case "clawTerminal":
+      s.route = "terminal";
+      render();
+      await serverCall("terminal", { id: s.server.id });
+      $("#terminalStatus").textContent = "SSH 已连接 · " + s.server.host;
+      break;
     case "clawRefresh":
       await loadClawSessions();
       break;
@@ -1270,7 +1318,10 @@ async function computerFiles(path) {
 }
 setInterval(() => {
   var _a;
-  if (s.connected && s.route === "chat") safe(refreshQueue);
+  if (s.connected && s.route === "chat") {
+    safe(refreshQueue);
+    safe(refreshQuota);
+  }
   if (s.connected && s.route === "threads") safe(loadThreads);
   if (s.tab === "services" && s.route === "claw" && s.clawSession && !((_a = document.activeElement) == null ? void 0 : _a.matches("textarea"))) safe(clawHistory);
 }, 12e3);

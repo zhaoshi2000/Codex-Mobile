@@ -1,4 +1,46 @@
 import SwiftUI
+
+struct CodexQuotaButton: View {
+    @ObservedObject var service: CodexConnectService
+    @State private var showing = false
+    var body: some View {
+        Button {
+            showing = true
+            Task { await service.refreshQuota(force: true) }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "gauge.with.dots.needle.33percent")
+                if let first = service.quota.first {
+                    Text("\(first.label)剩余 \(first.remaining, specifier: "%.0f")%")
+                } else { Text(service.quotaLoading ? "正在读取 Codex 额度…" : "Codex 额度") }
+                Image(systemName: "chevron.right")
+            }.font(.caption)
+        }
+        .disabled(!service.connected)
+        .task { await service.refreshQuota() }
+        .onChange(of: service.connected) { _, connected in if connected { Task { await service.refreshQuota(force: true) } } }
+        .sheet(isPresented: $showing) {
+            NavigationStack {
+                List {
+                    Section("电脑当前登录的 Codex 账号") {
+                        ForEach(service.quota) { window in
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack { Text(window.label); Spacer(); Text("剩余 \(window.remaining, specifier: "%.0f")%") }
+                                ProgressView(value: window.remaining, total: 100)
+                                if let reset = window.resetsAt { Text("重置时间：" + reset.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
+                            }.padding(.vertical, 4)
+                        }
+                        if service.quota.isEmpty { Text(service.quotaMessage).foregroundStyle(.secondary) }
+                    }
+                    if let checked = service.quotaCheckedAt { Text("查询时间：" + checked.formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
+                    Button("刷新额度") { Task { await service.refreshQuota(force: true) } }.disabled(service.quotaLoading || !service.connected)
+                    if service.quotaLoading { ProgressView() }
+                }.navigationTitle("Codex 剩余额度").navigationBarTitleDisplayMode(.inline)
+                    .toolbar { Button("完成") { showing = false } }
+            }
+        }
+    }
+}
 import QuickLook
 
 struct CodexDownloadCard: View {

@@ -29,6 +29,13 @@ struct CodexConnectError: LocalizedError {
     var errorDescription: String? { message }
 }
 
+struct CodexQuotaWindow: Identifiable {
+    let id: String
+    let label: String
+    let remaining: Double
+    let resetsAt: Date?
+}
+
 extension Data {
     init?(codexBase64URL value: String) {
         var s = value.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
@@ -78,6 +85,26 @@ extension Data {
 // Keeps only the selected conversation in memory. It never imports the PC's history database.
 @MainActor final class CodexConnectService: ObservableObject {
     @Published var connected = false
+    @Published var quota: [CodexQuotaWindow] = []
+    @Published var quotaMessage = "连接电脑后可查看 Codex 额度"
+    @Published var quotaLoading = false
+    @Published var quotaCheckedAt: Date?
+    func refreshQuota(force: Bool = false) async {
+        guard connected, !quotaLoading else { return }
+        if !force, let quotaCheckedAt, Date().timeIntervalSince(quotaCheckedAt) < 60 { return }
+        quotaLoading = true; defer { quotaLoading = false }
+        do {
+            let data = try await request("quota")
+            quota = (data["windows"] as? [[String: Any]] ?? []).compactMap { row in
+                guard let id = row["id"] as? String, let label = row["label"] as? String, let remaining = row["remainingPercent"] as? Double else { return nil }
+                return CodexQuotaWindow(id: id, label: label, remaining: remaining, resetsAt: (row["resetsAt"] as? Double).map { Date(timeIntervalSince1970: $0) })
+            }
+            quotaMessage = data["message"] as? String ?? "暂时无法读取额度"
+            quotaCheckedAt = Date()
+        } catch {
+            quota = []; quotaMessage = "无法读取 Codex 额度，请更新电脑连接程序后重试。"; quotaCheckedAt = Date()
+        }
+    }
     @Published var status = "未连接"
     @Published var error: String?
     @Published var queuedMessages: [CodexQueuedMessage] = []

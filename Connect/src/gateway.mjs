@@ -1,4 +1,5 @@
 import { CodexRPC } from "./rpc.mjs";
+import { quotaSummary } from "./quota.mjs";
 import { localLinkPath, matchesLinkedFile } from "./download-access.mjs";
 import { questionGroups, questionAnswer } from "./questions.mjs";
 import fs from "node:fs/promises";
@@ -266,6 +267,10 @@ export class Gateway {
   }
   async dispatch(method, p, peer) {
     switch (method) {
+      case "quota": {
+        try { return quotaSummary(await this.rpc.call("account/rateLimits/read", {}, 15000)); }
+        catch { return {available: false, windows: [], message: "暂时无法读取 Codex 额度，请确认电脑已登录 Codex，或稍后刷新。"}; }
+      }
       case "navigation": return this.navigationData(peer);
       case "markRead": {
         await this.authorizeThread(p.threadId);

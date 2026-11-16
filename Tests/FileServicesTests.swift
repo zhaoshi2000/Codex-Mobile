@@ -75,6 +75,11 @@ final class FileServicesTests: XCTestCase {
         XCTAssertThrowsError(try OpenClawProtocol.command(executable: "openclaw", container: "", method: "config.set", params: [:]))
     }
     func testOpenClawResponseVariantsAndErrors() throws {
+        XCTAssertEqual(try OpenClawProtocol.decode("{\"sessions\":[]}\n__ASTROGATE_OC_EXIT__:0\n")["sessions"] as? [String], [])
+        XCTAssertThrowsError(try OpenClawProtocol.decode("Gateway connection refused\n__ASTROGATE_OC_EXIT__:1\n")) { error in
+            XCTAssertTrue(error.localizedDescription.contains("Gateway connection refused"))
+        }
+        XCTAssertThrowsError(try OpenClawProtocol.command(executable: "openclaw", container: "", user: "bad;user", method: "sessions.list", params: [:]))
         XCTAssertEqual(try OpenClawProtocol.decode("doctor warning\n{\"sessions\":[]}")["sessions"] as? [String], [])
         XCTAssertEqual(try OpenClawProtocol.decode("{\"ok\":true,\"payload\":{\"runId\":\"run\"}}")["runId"] as? String, "run")
         XCTAssertThrowsError(try OpenClawProtocol.decode("{\"ok\":false,\"error\":{\"message\":\"permission denied\"}}"))

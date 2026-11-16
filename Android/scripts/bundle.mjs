@@ -2,6 +2,9 @@ import {transform} from 'esbuild';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 const root=path.resolve(import.meta.dirname,'..');
+const protocol=await fs.readFile(path.join(root,'../iFilePlus/Services/OpenClawProtocol.swift'),'utf8');
+const launcher=protocol.match(/static let launcher = #"""\r?\n([\s\S]*?)\r?\n    """#/)[1].split(/\r?\n/).map(line=>line.replace(/^    /,'')).join('\n');
+await fs.writeFile(path.join(root,'app/src/main/assets/openclaw-launcher.sh'),launcher+'\n');
 for(const name of ['core','app']){
  const source=await fs.readFile(path.join(root,'web',name+'.js'),'utf8');
  const {code}=await transform(source,{target:'chrome74',legalComments:'inline',charset:'utf8'});

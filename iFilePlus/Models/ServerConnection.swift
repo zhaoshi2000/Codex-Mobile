@@ -62,6 +62,7 @@ struct ServerConnection: Identifiable, Codable, Hashable {
     var openClawExecutable: String? = nil
     var openClawContainer: String? = nil
     var openClawSession: String? = nil
+    var openClawUser: String? = nil
     var chatAlias: String { let value = openClawAlias?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""; return value.isEmpty ? "OC" : value }
 
     var address: String { "\(host):\(port)" }

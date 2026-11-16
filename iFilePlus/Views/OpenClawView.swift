@@ -7,11 +7,12 @@ struct OpenClawView: View {
     @StateObject private var model: OpenClawService
     @State private var draft = ""
     @State private var showSessions = false
+    @State private var showTerminal = false
     init(connection: ServerConnection) { self.connection = connection; _model = StateObject(wrappedValue: OpenClawService(connection: connection)) }
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Label(model.connected ? "SSH 已连接" : "SSH 未连接", systemImage: model.connected ? "checkmark.circle" : "wifi.slash")
+                Label(model.sshConnected ? (model.connected ? "OpenClaw 已连接" : "SSH 已连接 · OpenClaw 未就绪") : "SSH 未连接", systemImage: model.sshConnected ? "checkmark.circle" : "wifi.slash")
                 Spacer()
                 Text(model.running ? connection.chatAlias + " 正在处理…" : connection.chatAlias)
             }.font(.caption).foregroundStyle(.secondary).padding()
@@ -43,10 +44,17 @@ struct OpenClawView: View {
         }
         .navigationTitle(connection.name + " · " + connection.chatAlias).navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            Button("终端", systemImage: "terminal") { showTerminal = true }
             Menu {
                 Button("选择会话") { showSessions = true }.disabled(!model.connected || model.sending || model.deliveryPending)
                 Button("重新连接") { Task { await model.connect(store: store) } }.disabled(model.busy || model.sending)
             } label: { Image(systemName: "ellipsis.circle") }
+        }
+        .sheet(isPresented: $showTerminal) {
+            NavigationStack {
+                SSHTerminalView(connection: store.connections.first(where: { $0.id == connection.id }) ?? connection)
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回聊天") { showTerminal = false } } }
+            }
         }
         .sheet(isPresented: $showSessions) {
             NavigationStack { List(model.sessions) { row in Button { showSessions = false; Task { await model.select(row.id) } } label: { HStack { Text(row.title); Spacer(); if row.active { ProgressView() }; if row.id == model.selected { Image(systemName: "checkmark") } } } }.navigationTitle("OpenClaw 会话").task { do { try await model.loadSessions() } catch { model.error = error.localizedDescription } }.toolbar { Button("完成") { showSessions = false } } }

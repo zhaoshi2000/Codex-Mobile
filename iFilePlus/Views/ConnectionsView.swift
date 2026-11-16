@@ -64,6 +64,7 @@ struct ConnectionEditorView: View {
     private let openClawSetup: Bool
     @State private var chatAlias = "OC"
     @State private var clawExecutable = "openclaw"
+    @State private var clawUser = ""
     @State private var clawContainer = ""
     @State private var clawSession = "agent:main:main"
     @EnvironmentObject private var store: ConnectionStore
@@ -87,6 +88,7 @@ struct ConnectionEditorView: View {
         self.openClawSetup = openClawSetup
         _chatAlias = State(initialValue: connection?.openClawAlias ?? "OC")
         _clawExecutable = State(initialValue: connection?.openClawExecutable ?? "openclaw")
+        _clawUser = State(initialValue: connection?.openClawUser ?? "")
         _clawContainer = State(initialValue: connection?.openClawContainer ?? "")
         _clawSession = State(initialValue: connection?.openClawSession ?? "agent:main:main")
         existingConnection = connection
@@ -179,6 +181,7 @@ struct ConnectionEditorView: View {
                 Section("OpenClaw") {
                     TextField("聊天简称", text: $chatAlias)
                     TextField("命令或可执行文件路径", text: $clawExecutable).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("运行用户（留空自动识别）", text: $clawUser).textInputAutocapitalization(.never).autocorrectionDisabled()
                     TextField("Docker 容器名称（可选）", text: $clawContainer).textInputAutocapitalization(.never).autocorrectionDisabled()
                     TextField("默认会话", text: $clawSession).textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
@@ -291,7 +294,8 @@ struct ConnectionEditorView: View {
             openClawAlias: String(chatAlias.prefix(16)),
             openClawExecutable: clawExecutable.isEmpty ? "openclaw" : clawExecutable,
             openClawContainer: clawContainer,
-            openClawSession: clawSession.isEmpty ? "agent:main:main" : clawSession
+            openClawSession: clawSession.isEmpty ? "agent:main:main" : clawSession,
+            openClawUser: clawUser.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         do {
             try store.upsert(connection, password: needsPassword ? password : "", privateKey: needsPassword ? nil : cleanKey)

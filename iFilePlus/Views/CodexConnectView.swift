@@ -156,6 +156,7 @@ private struct CodexHostView: View {
             Section {
                 Label(service.status, systemImage: service.connected ? "checkmark.circle.fill" : "wifi.slash").foregroundStyle(service.connected ? .green : .secondary)
                 Text("电脑本机记录 · 服务器仅转发").font(.caption).foregroundStyle(.secondary)
+                CodexQuotaButton(service: service)
                 if let error = service.error { Text(error).font(.footnote).foregroundStyle(.red) }
                 if !service.connected { Button("重新连接") { Task { await load() } }.disabled(loading) }
             }
@@ -395,6 +396,7 @@ private struct CodexChatContent: View {
                     }.disabled(!service.writable)
                 }
                 if service.approvalNeeded { Label("有操作等待确认，请在电脑处理后继续。", systemImage: "hand.raised").font(.footnote).foregroundStyle(.orange) }
+                CodexQuotaButton(service: service)
                 if let error = service.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
                 if !service.writable {
                     Button("在电脑打开此对话") { Task { do { _ = try await service.request("activate", ["threadId": thread.id]); try? await Task.sleep(for: .seconds(2)); await service.select(thread.id) } catch { service.error = error.localizedDescription } } }

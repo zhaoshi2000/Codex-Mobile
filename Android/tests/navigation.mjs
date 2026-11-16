@@ -9,7 +9,8 @@ await fs.mkdir('Build',{recursive:true});
 const root=path.resolve('Android/app/src/main/assets'),checks=[];
 const mock=`window.fixture={devices:[{hostId:'pc-a',name:'电脑 A'},{hostId:'pc-b',name:'电脑 B'}],servers:[{id:'ssh',name:'SSH 测试',type:'ssh',host:'example.invalid'},{id:'sftp',name:'文件服务',type:'sftp',host:'example.invalid'},{id:'oc',name:'OpenClaw',type:'openclaw',host:'example.invalid'}]};
 window.Native={call(id,op,json){let p=JSON.parse(json),r={};if(op==='boot')r=fixture;if(op==='localList'||op==='sftpList')r=[];
-if(op==='rpc'){switch(p.method){case 'threads':r={threads:[{id:'chat-'+window.pc,title:'测试对话 '+window.pc}]};break;case 'navigation':r={projects:[{id:'p1',name:'项目一'}],unread:[]};break;case 'activity':r={tasks:[]};break;case 'watch':r={writable:true};break;case 'history':r={messages:[{id:'m1',role:'assistant',text:'测试回复',turnId:'turn1'}]};break;case 'models':r={models:[],current:{model:'test'}};break;case 'queued':r={messages:[]};break;}}
+if(op==='rpc'){switch(p.method){case 'quota':r={available:true,windows:[{id:'codex:primary',label:'周额度',remainingPercent:11,resetsAt:2000000000}]};break;case 'threads':r={threads:[{id:'chat-'+window.pc,title:'测试对话 '+window.pc}]};break;case 'navigation':r={projects:[{id:'p1',name:'项目一'}],unread:[]};break;case 'activity':r={tasks:[]};break;case 'watch':r={writable:true};break;case 'history':r={messages:[{id:'m1',role:'assistant',text:'测试回复',turnId:'turn1'}]};break;case 'models':r={models:[],current:{model:'test'}};break;case 'queued':r={messages:[]};break;}}
+if(op==='openclaw'){queueMicrotask(()=>nativeReply({id,error:'Gateway connection refused'}));return;}
 if(op==='connect')window.pc=p.id;
 if(op==='pair'){fixture.devices.push({hostId:'pc-c',name:'电脑 C'});r=fixture;}
 if(op==='renameDevice'){fixture.devices.find(d=>d.hostId===p.id).alias=p.name;r=fixture;}
@@ -37,6 +38,10 @@ try{
  await check('Selecting computer opens Codex projects and conversations',`s.tab==='codex'&&s.route==='threads'&&s.device.hostId==='pc-a'&&document.querySelector('#projectlist')!==null`);
  await click('[data-action=thread]');
  await check('Chat opens in first tab',`s.tab==='codex'&&s.thread.id==='chat-pc-a'&&document.querySelector('#page').textContent.includes('测试回复')`);
+ await check('Codex quota summary shows remaining percentage',`document.querySelector('[data-quotabox]').textContent.includes('剩余 11%')`);
+ await click('[data-action=quota]');
+ await check('Quota details include reset time',`document.querySelector('#modal').textContent.includes('重置时间')`);
+ await click('[data-modal="0"]');
  await run(`s.draft='未发送的草稿';renderComposer()`);
  await click('[data-tab=connect]');await click('[data-tab=codex]');
  await check('Switching tabs preserves conversation and draft',`s.route==='chat'&&s.thread.id==='chat-pc-a'&&document.querySelector('#draft').value==='未发送的草稿'`);
@@ -57,6 +62,10 @@ try{
  await check('SFTP opens under services',`s.tab==='services'&&s.route==='sftp'`);
  await run(`window.goBack()`);await new Promise(r=>setTimeout(r,100));
  await check('Back from service returns to service list',`s.tab==='services'&&s.route==='servers'`);
+ await click('[data-action=server][data-id=oc]');
+ await check('OpenClaw failures show details with terminal still available',`document.querySelector('#page').textContent.includes('Gateway connection refused')&&document.querySelector('[data-action=clawTerminal]')!==null`);
+ await click('[data-action=clawTerminal]');
+ await check('OpenClaw terminal entry opens SSH despite Gateway failure',`s.route==='terminal'&&document.querySelector('#terminalStatus').textContent.includes('SSH 已连接')`);
  await click('[data-tab=connect]');await click('#header [data-action=pair]');
  await check('Connection add opens pairing dialog',`!document.querySelector('#modal').hidden&&document.querySelector('#modal input[name=uri]')!==null`);
  await run(`window.goBack();await pair('fixture://new')`);

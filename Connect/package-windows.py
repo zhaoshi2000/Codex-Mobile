@@ -8,7 +8,7 @@ import zipfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--runtime', required=True, type=Path, help='Directory containing node.exe and LICENSE')
-parser.add_argument('--version', default='0.4.19-pc2')
+parser.add_argument('--version', default='0.4.21')
 args = parser.parse_args()
 if not all(c.isalnum() or c in '.-' for c in args.version):
     parser.error('Invalid version')
@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix='astrogate-package-') as temp:
 2. 将 ZIP 完整解压到任意可写目录；双击 Open AstroGate Connect.cmd。
 3. 首次输入中转 WSS 地址与连接密钥。使用已有中转即可，无需再部署一台服务器。
    注意：这是中转连接密钥，不是 AI API Key。
-4. 手机 AstroGate 管家 → Codex → ＋ → 扫描电脑显示的二维码。
+4. 手机 AstroGate 管家 → 连接 → ＋ → 扫描电脑显示的二维码。
 
 每台电脑各自生成身份和配对，手机可添加多台电脑。不要复制旧电脑的 .ifileplus-connect 目录。
 无需另外安装 Node.js、Python 或开发工具；程序使用包内 Runtime。

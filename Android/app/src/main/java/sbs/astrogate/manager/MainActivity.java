@@ -949,21 +949,25 @@ public class MainActivity extends Activity {
               || command.contains("\0")
               || (!container.isEmpty() && !container.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")))
             throw new Exception("OpenClaw 配置无效");
-          String prefix =
-              container.isEmpty()
-                  ? Servers.quote(command)
-                  : "docker exec " + Servers.quote(container) + " " + Servers.quote(command);
+          String runUser = server.optString("runUser");
+          if (!runUser.isEmpty() && !runUser.matches("[a-zA-Z_][a-zA-Z0-9_-]{0,63}")) throw new Exception("OpenClaw 运行用户无效");
+          String launcher;
+          try (java.io.InputStream input = getAssets().open("openclaw-launcher.sh")) {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[4096]; int n;
+            while ((n = input.read(buffer)) != -1) bytes.write(buffer, 0, n);
+            launcher = bytes.toString("UTF-8");
+          }
           String output =
               servers.execute(
                   server,
-                  "export PATH=\"$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:$PATH\";"
-                      + " NO_COLOR=1 "
-                      + prefix
+                  "sh -c " + Servers.quote(launcher) + " sh "
+                      + Servers.quote(command) + " " + Servers.quote(container) + " " + Servers.quote(runUser)
                       + " gateway call "
                       + Servers.quote(method)
                       + " --params "
                       + Servers.quote(p.getJSONObject("params").toString())
-                      + " --json --timeout 15000");
+                      + " --json --timeout 15000 2>&1");
           String[] lines = output.split("\n");
           for (int i = 0; i < Math.min(80, lines.length); i++) {
             try {
