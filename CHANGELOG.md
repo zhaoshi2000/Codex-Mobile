@@ -1,3 +1,7 @@
+# Android 0.1.0 — 2026-11-16
+
+首次提供 Android 10+ APK：本机文件、SSH/SFTP/FTP、电脑 Codex 和服务器 AI/OpenClaw。复用现有加密配对与消息协议，包含排队引导、图片预览缓存、文件下载进度、模型选择、对话管理和命令折叠。源码、构建与验证范围见 Android/README.md。
+
 # Changelog
 
 ## 0.3.3

@@ -16,3 +16,12 @@ DerivedData/
 
 # macOS
 .DS_Store
+
+# Android SDK paths, caches, and private signing material
+Android/.gradle/
+Android/local.properties
+**/*.jks
+**/*.keystore
+*.apk
+*.aab
+Android/node_modules/

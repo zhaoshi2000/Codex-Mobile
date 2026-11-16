@@ -1,0 +1,11 @@
+{
+  "name": "astrogate-android-ui",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/bundle.mjs",
+    "test": "node --test tests/core.test.cjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}
