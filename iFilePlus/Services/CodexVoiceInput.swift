@@ -155,8 +155,16 @@ struct CodexVoiceInput: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if voice.active && !voice.partial.isEmpty {
-                ScrollView { Text(voice.partial).frame(maxWidth: .infinity, alignment: .leading) }
-                    .frame(maxHeight: 110).padding(10).background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(voice.partial).frame(maxWidth: .infinity, alignment: .leading)
+                            Color.clear.frame(height: 1).id("voice-bottom")
+                        }
+                    }
+                    .onChange(of: voice.partial) { _, _ in proxy.scrollTo("voice-bottom", anchor: .bottom) }
+                }
+                .frame(maxHeight: 110).padding(10).background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
             }
             HStack(spacing: 12) {
                 Button {
