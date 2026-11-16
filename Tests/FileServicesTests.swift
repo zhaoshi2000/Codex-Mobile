@@ -2,6 +2,89 @@ import XCTest
 @testable import FileServices
 
 final class FileServicesTests: XCTestCase {
+    @MainActor func testNavigationCacheReopenAndHeadRefreshRetainsOlderRows() async {
+        var clock = Date(timeIntervalSince1970: 100)
+        var requests: [String] = []
+        var latest = false
+        let cache = CodexNavigationCache(now: { clock }) { method, params in
+            requests.append(method)
+            if method == "projects" { return ["projects": [["id": "p", "name": "Project"]]] }
+            if params["cursor"] != nil { return ["threads": [["id": "older", "title": "Older"]]] }
+            return ["threads": latest ? [["id": "new", "title": "New"], ["id": "a", "title": "Renamed"]] : [["id": "a", "title": "A"]], "nextCursor": "page2"]
+        }
+        await cache.refresh()
+        cache.expanded.insert("p"); cache.projectsExpanded = true
+        await cache.load(more: true)
+        XCTAssertEqual(cache.page().rows.map(\.id), ["a", "older"])
+        let before = requests.count
+        // The view can be destroyed/recreated without destroying this device-owned cache.
+        await cache.load()
+        XCTAssertEqual(requests.count, before)
+        XCTAssertTrue(cache.projectsExpanded); XCTAssertTrue(cache.expanded.contains("p"))
+        clock = clock.addingTimeInterval(11); latest = true
+        await cache.load()
+        XCTAssertEqual(cache.page().rows.map(\.id), ["new", "a", "older"])
+        XCTAssertEqual(cache.page().rows[1].title, "Renamed")
+        XCTAssertEqual(requests.count, before + 1)
+    }
+
+    @MainActor func testNavigationCacheCoalescesRequestsAndKeepsRowsOnFailure() async {
+        var calls = 0
+        let cache = CodexNavigationCache { _, _ in
+            calls += 1
+            try await Task.sleep(nanoseconds: 20_000_000)
+            throw NSError(domain: "offline", code: 1)
+        }
+        cache.seed("threads", params: [:], result: ["threads": [["id": "saved", "title": "Saved"]], "nextCursor": "c"])
+        async let one: Void = cache.load(force: true)
+        async let two: Void = cache.load(force: true)
+        _ = await (one, two)
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(cache.page().rows.map(\.id), ["saved"])
+        XCTAssertEqual(cache.page().cursor, "c")
+        XCTAssertNotNil(cache.error); XCTAssertTrue(cache.loading.isEmpty)
+    }
+
+    @MainActor func testNavigationCachePaginationOverlapExpiryAndRemoval() async {
+        var cursors: [String] = []
+        let cache = CodexNavigationCache { _, params in
+            let cursor = params["cursor"] as? String ?? "head"
+            cursors.append(cursor)
+            switch cursor {
+            case "expired": throw NSError(domain: "cursor", code: 1, userInfo: [NSLocalizedDescriptionKey: "列表已更新，请下拉刷新后重试"])
+            case "head": return ["threads": [["id": "a", "title": "A"]], "nextCursor": "second"]
+            case "second": return ["threads": [["id": "b", "title": "B"]], "nextCursor": "third"]
+            default: return ["threads": [["id": "c", "title": "C"]]]
+            }
+        }
+        cache.seed("threads", params: [:], result: ["threads": [["id": "a", "title": "A"], ["id": "b", "title": "B"]], "nextCursor": "expired"])
+        await cache.load(more: true)
+        XCTAssertEqual(cursors, ["expired", "head", "second", "third"])
+        XCTAssertEqual(cache.page().rows.map(\.id), ["a", "b", "c"])
+        XCTAssertNil(cache.page().cursor)
+        cache.remove("a")
+        await cache.load(force: true)
+        XCTAssertEqual(cache.page().rows.map(\.id), ["b", "c"])
+        XCTAssertEqual(Set(cache.page().rows.map(\.id)).count, cache.page().rows.count)
+    }
+
+    @MainActor func testNavigationCacheSeedsHostAndSeparatesDevicesAndProjects() async {
+        var calls = 0
+        let cache = CodexNavigationCache { _, _ in calls += 1; return [:] }
+        let other = CodexNavigationCache { _, _ in [:] }
+        cache.seed("projects", params: [:], result: ["projects": [["id": "p", "name": "Project"]]])
+        cache.seed("threads", params: [:], result: ["threads": [["id": "a", "title": "A"]]])
+        cache.seed("threads", params: ["projectId": "p"], result: ["threads": [["id": "b", "title": "B"]]])
+        await cache.refresh()
+        XCTAssertEqual(calls, 0)
+        XCTAssertEqual(cache.page().rows.map(\.id), ["a"])
+        XCTAssertEqual(cache.page("p").rows.map(\.id), ["b"])
+        XCTAssertTrue(other.page().rows.isEmpty); XCTAssertTrue(other.projects.isEmpty)
+        // An authoritative short first page removes stale rows.
+        await cache.load(force: true)
+        XCTAssertTrue(cache.page().rows.isEmpty)
+    }
+
     func testMessageImageStackSeparatesOnlyImageAttachmentLinks() {
         let content = "正文\n📎 [照片](<C:/folder/照片.jpg>)\n📎 [文档](<C:/folder/readme.md>)\n📎 [照片](<C:/folder/照片.jpg>)\n📎 [二](<C:/two.PNG>)"
         let images = CodexMessageImages(content)

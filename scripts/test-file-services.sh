@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ifile-tests.XXXXXX")"
 trap 'rm -rf "$TEST_DIR"' EXIT
 mkdir -p "$TEST_DIR/Sources/FileServices" "$TEST_DIR/Tests/FileServicesTests/Fixtures"
-cp "$ROOT/iFilePlus/Services/CodexThumbnailCache.swift" "$ROOT/iFilePlus/Services/CodexDownloadState.swift" "$ROOT/iFilePlus/Services/CodexChatTimeline.swift" "$ROOT/iFilePlus/Services/ServerAIProtocol.swift" "$ROOT/iFilePlus/Services/OpenClawProtocol.swift" "$ROOT/iFilePlus/Services/ChatMarkdown.swift" "$ROOT/iFilePlus/Services/ArchiveService.swift" "$ROOT/iFilePlus/Services/LocalFileService.swift" "$TEST_DIR/Sources/FileServices/"
+cp "$ROOT/iFilePlus/Services/CodexNavigationCache.swift" "$ROOT/iFilePlus/Services/CodexThumbnailCache.swift" "$ROOT/iFilePlus/Services/CodexDownloadState.swift" "$ROOT/iFilePlus/Services/CodexChatTimeline.swift" "$ROOT/iFilePlus/Services/ServerAIProtocol.swift" "$ROOT/iFilePlus/Services/OpenClawProtocol.swift" "$ROOT/iFilePlus/Services/ChatMarkdown.swift" "$ROOT/iFilePlus/Services/ArchiveService.swift" "$ROOT/iFilePlus/Services/LocalFileService.swift" "$TEST_DIR/Sources/FileServices/"
 cp "$ROOT/Tests/FileServicesTests.swift" "$TEST_DIR/Tests/FileServicesTests/"
 cat > "$TEST_DIR/Package.swift" <<'SWIFT'
 // swift-tools-version: 5.9

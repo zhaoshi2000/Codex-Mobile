@@ -232,7 +232,7 @@ struct CodexModelPicker: View {
                 if let error { Text(error).foregroundStyle(.red) }
             }.navigationTitle("选择模型").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() }.disabled(busy) } }
-                .task { await service.refreshModels(threadID) }
+               .task { await service.refreshModels(threadID) }
         }
     }
 }
@@ -242,16 +242,11 @@ struct CodexChatNavigation: View {
     let currentID: String
     let select: (CodexRow) -> Void
     let exit: () -> Void
-    @State private var projects: [CodexRow] = []
-    @State private var recent: [CodexRow] = []
-    @State private var expanded: Set<String> = []
-    @State private var projectsExpanded = false
-    @State private var projectThreads: [String: [CodexRow]] = [:]
-    @State private var projectCursors: [String: String] = [:]
-    @State private var loadingProjects: Set<String> = []
-    @State private var recentCursor: String?
-    @State private var loading = false
-    @State private var error: String?
+    @ObservedObject private var cache: CodexNavigationCache
+    init(service: CodexConnectService, currentID: String, select: @escaping (CodexRow) -> Void, exit: @escaping () -> Void) {
+        self.service = service; self.currentID = currentID; self.select = select; self.exit = exit
+        self.cache = service.navigationCache
+    }
     @State private var creating = false
     var body: some View {
         VStack(spacing: 0) {
@@ -268,35 +263,41 @@ struct CodexChatNavigation: View {
             List {
                 Section { Button("返回设备列表", systemImage: "desktopcomputer") { exit() } }
                 Section {
-                    DisclosureGroup(isExpanded: $projectsExpanded) {
-                    ForEach(projects) { project in
-                        DisclosureGroup(isExpanded: Binding(get: { expanded.contains(project.id) }, set: { open in
-                            if open { expanded.insert(project.id); if projectThreads[project.id] == nil { Task { await loadProject(project.id) } } }
-                            else { expanded.remove(project.id) }
+                    DisclosureGroup(isExpanded: $cache.projectsExpanded) {
+                    ForEach(cache.projects) { project in
+                        DisclosureGroup(isExpanded: Binding(get: { cache.expanded.contains(project.id) }, set: { open in
+                            if open { cache.expanded.insert(project.id); Task { await cache.load(project.id) } }
+                            else { cache.expanded.remove(project.id) }
                         })) {
-                            ForEach(projectThreads[project.id] ?? []) { thread in threadRow(thread) }
-                            if loadingProjects.contains(project.id) { ProgressView() }
-                            if projectCursors[project.id] != nil { Button("查看更多（20 条）") { Task { await loadProject(project.id, more: true) } }.disabled(loadingProjects.contains(project.id)) }
-                            if projectThreads[project.id]?.isEmpty == true { Text("暂无对话").foregroundStyle(.secondary) }
+                            ForEach(cache.page(project.id).rows) { thread in threadRow(thread) }
+                            if cache.loading.contains(project.id) { ProgressView() }
+                            if cache.page(project.id).cursor != nil { Button("查看更多（20 条）") { Task { await cache.load(project.id, more: true) } }.disabled(cache.loading.contains(project.id)) }
+                            if cache.pages[project.id]?.rows.isEmpty == true { Text("暂无对话").foregroundStyle(.secondary) }
                         } label: {
                             HStack { Label(project.title, systemImage: "folder"); Spacer(); projectBadge(project.id) }
                         }
                     }
                     } label: {
-                        HStack { Label("项目", systemImage: "folder"); Spacer(); Text("\(projects.count)").foregroundStyle(.secondary) }
+                        HStack { Label("项目", systemImage: "folder"); Spacer(); Text("\(cache.projects.count)").foregroundStyle(.secondary) }
                     }
                 }
                 Section("最近对话") {
-                    ForEach(recent) { thread in threadRow(thread) }
-                    if recentCursor != nil { Button("查看更多（20 条）") { Task { await loadRecent(more: true) } }.disabled(loading) }
-                    if loading { ProgressView() }
+                    ForEach(cache.page().rows) { thread in threadRow(thread) }
+                    if cache.page().cursor != nil { Button("查看更多（20 条）") { Task { await cache.load(more: true) } }.disabled(cache.loading.contains("")) }
+                    if cache.loading.contains("") && cache.page().rows.isEmpty { ProgressView() }
                 }
-                if let error { Text(error).font(.caption).foregroundStyle(.red) }
+                if let error = cache.error { Text(error).font(.caption).foregroundStyle(.red) }
             }
             .listStyle(.insetGrouped)
-            .sheet(isPresented: $creating) { CodexNewChatView(service: service, projects: projects) { row in select(row) } }
-            .refreshable { await load() }
-            .task { await load(); while !Task.isCancelled { await service.refreshActivity(); try? await Task.sleep(for: .seconds(4)) } }
+            .sheet(isPresented: $creating) { CodexNewChatView(service: service, projects: cache.projects) { row in select(row) } }
+            .refreshable { await cache.refresh(force: true) }
+            .task {
+                // Let the opening animation finish; cached rows are visible immediately.
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                await cache.refresh()
+                while !Task.isCancelled { await service.refreshActivity(); try? await Task.sleep(for: .seconds(4)) }
+            }
         }
     }
     private func threadRow(_ thread: CodexRow) -> some View {
@@ -309,43 +310,12 @@ struct CodexChatNavigation: View {
                 else if service.unreadThreads.contains(thread.id) { Circle().fill(.blue).frame(width: 8, height: 8).accessibilityLabel("完成未读") }
             }
         }
-        .modifier(CodexDeleteChat(service: service, thread: thread, onDeleted: { await load() }))
+        .modifier(CodexDeleteChat(service: service, thread: thread, onDeleted: { await cache.refresh(force: true) }))
     }
     @ViewBuilder private func projectBadge(_ id: String) -> some View {
         if service.runningProjects.contains(id) { Circle().fill(.green).frame(width: 8, height: 8).accessibilityLabel("项目有任务正在运行") }
         else if service.unreadProjects.contains(id) { Circle().fill(.blue).frame(width: 8, height: 8).accessibilityLabel("项目有已完成未读任务") }
     }
-    private func rows(_ result: [String: Any]) -> [CodexRow] {
-        (result["threads"] as? [[String: Any]] ?? []).compactMap { x in guard let id = x["id"] as? String else { return nil }; return CodexRow(id: id, title: x["title"] as? String ?? "对话") }
-    }
-    private func load() async {
-        do {
-            let data = try await service.request("navigation")
-            projects = (data["projects"] as? [[String: Any]] ?? []).compactMap { x in guard let id = x["id"] as? String else { return nil }; return CodexRow(id: id, title: x["name"] as? String ?? "项目") }
-            service.unreadThreads = Set(data["unread"] as? [String] ?? [])
-            await loadRecent()
-            for id in expanded { await loadProject(id) }
-        } catch { self.error = error.localizedDescription }
-    }
-    private func loadRecent(more: Bool = false) async {
-        guard !loading else { return }; loading = true; defer { loading = false }
-        do {
-            var params: [String: Any] = ["limit": 20]; if more, let cursor = recentCursor { params["cursor"] = cursor }
-            let result = try await service.request("threads", params); let page = rows(result)
-            if more { recent += page.filter { row in !recent.contains(where: { $0.id == row.id }) } } else { recent = page }
-            recentCursor = result["nextCursor"] as? String
-        } catch { self.error = error.localizedDescription }
-    }
-    private func loadProject(_ id: String, more: Bool = false) async {
-        guard !loadingProjects.contains(id) else { return }; loadingProjects.insert(id); defer { loadingProjects.remove(id) }
-        do {
-            var params: [String: Any] = ["projectId": id, "limit": 20]; if more, let cursor = projectCursors[id] { params["cursor"] = cursor }
-            let result = try await service.request("threads", params); let page = rows(result)
-            if more { let old = projectThreads[id] ?? []; projectThreads[id] = old + page.filter { row in !old.contains(where: { $0.id == row.id }) } } else { projectThreads[id] = page }
-            projectCursors[id] = result["nextCursor"] as? String
-        } catch { self.error = error.localizedDescription }
-    }
-
 }
 
 

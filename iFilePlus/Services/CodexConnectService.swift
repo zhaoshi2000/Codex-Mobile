@@ -16,14 +16,6 @@ struct CodexDevice: Codable, Identifiable {
     var displayName: String { alias?.isEmpty == false ? alias! : hostName }
 }
 
-struct CodexRow: Identifiable, Hashable {
-    let id: String
-    let title: String
-    var path: String = ""
-    var directory: Bool = false
-    var size: Int = 0
-}
-
 struct CodexConnectError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
@@ -84,6 +76,10 @@ extension Data {
 
 // Keeps only the selected conversation in memory. It never imports the PC's history database.
 @MainActor final class CodexConnectService: ObservableObject {
+    lazy var navigationCache = CodexNavigationCache { [weak self] method, params in
+        guard let self else { throw CodexConnectError(message: "电脑连接已关闭") }
+        return try await self.request(method, params)
+    }
     @Published var connected = false
     @Published var quota: [CodexQuotaWindow] = []
     @Published var quotaMessage = "连接电脑后可查看 Codex 额度"
@@ -354,6 +350,9 @@ extension Data {
             }
             enqueue(["id": id, "method": method, "params": params], encrypted: true)
         }
+        navigationCache.seed(method, params: params, result: result)
+        if method == "deleteThread", let id = params["threadId"] as? String { navigationCache.remove(id) }
+        if ["createThread", "forkThread", "renameThread"].contains(method) { navigationCache.invalidate() }
         // Fresh native list titles supersede phone-side immediate rename feedback.
         let rows = (result["threads"] as? [[String: Any]] ?? []) + (result["pinned"] as? [[String: Any]] ?? [])
         for row in rows {
