@@ -366,25 +366,29 @@ extension Data {
         return result
     }
     private func merge(_ rows: [[String: Any]], history: Bool = false) {
+        var updated = messages
         for row in rows {
             guard let id = row["id"] as? String, row["role"] as? String == "user", let text = row["text"] as? String else { continue }
             for (key, p) in optimistic where p.thread == selectedThread && !p.baseline.contains(id) {
                 if row["clientMessageId"] as? String == key || text == p.text || (!p.text.isEmpty && text.hasPrefix(p.text + "\n")) {
-                    optimistic.removeValue(forKey: key); messages.removeAll { $0.id == key }
+                    optimistic.removeValue(forKey: key); updated.removeAll { $0.id == key }
                 }
             }
         }
-        messages = CodexChatTimeline.merge(messages, rows.compactMap(CodexChatMessage.init), history: history)
-        for p in optimistic.values where p.thread == selectedThread && !messages.contains(where: { $0.id == p.bubble.id }) { messages.append(p.bubble) }
+        updated = CodexChatTimeline.merge(updated, rows.compactMap(CodexChatMessage.init), history: history)
+        for p in optimistic.values where p.thread == selectedThread && !updated.contains(where: { $0.id == p.bubble.id }) { updated.append(p.bubble) }
         // At most 100 bubbles and 512 KB of text in the live screen.
-        while messages.count > 200 || messages.reduce(0, { $0 + $1.text.utf8.count }) > 512000 { messages.removeFirst() }
+        while updated.count > 200 || updated.reduce(0, { $0 + $1.text.utf8.count }) > 512000 { updated.removeFirst() }
+        messages = updated
     }
     func select(_ threadID: String, activate: Bool = true) async {
+        let retainVisibleMessages = selectedThread == threadID && !showingOlder
         taskFailure = nil; modelEfforts = [:]; modelDefaultEfforts = [:]
         selection = UUID(); let token = selection
         writable = false
         if !connected { await connect(); if selectedThread == threadID { return } }
-        running = false; notice = nil; questions = []; queuedMessages = []; progressLabel = ""; progressSteps = []; currentModel = ""; currentEffort = ""; models = []; selectedThread = threadID; showingOlder = false; messages = []; olderCursor = nil; turnID = nil; approvalNeeded = false; error = nil
+        running = false; notice = nil; questions = []; queuedMessages = []; progressLabel = ""; progressSteps = []; currentModel = ""; currentEffort = ""; models = []; selectedThread = threadID; showingOlder = false; olderCursor = nil; turnID = nil; approvalNeeded = false; error = nil
+        if !retainVisibleMessages { messages = [] }
         do {
             let page = try await request("history", ["threadId": threadID])
             guard selectedThread == threadID, selection == token else { return }
@@ -418,16 +422,17 @@ extension Data {
         } catch { self.error = error.localizedDescription }
     }
     func showOutgoing(_ text: String, to threadID: String, messageID: String, names: [String] = [], displayText: String? = nil) {
-        guard optimistic[messageID] == nil,
+        guard selectedThread == threadID,
               !messages.contains(where: { !$0.provisional && ($0.id == messageID || $0.clientMessageID == messageID) }) else { return }
         let display = displayText ?? ([text] + names.map { "📎 " + $0 }).filter { !$0.isEmpty }.joined(separator: "\n")
         let bubble = CodexChatMessage(id: messageID, text: display, delivery: "正在发送…")
-        optimistic[messageID] = (threadID, text.isEmpty ? "请查看附件" : text, bubble, Set(messages.map(\.id)))
-        messages.append(bubble)
+        let baseline = optimistic[messageID]?.baseline ?? Set(messages.map(\.id))
+        optimistic[messageID] = (threadID, text.isEmpty ? "请查看附件" : text, bubble, baseline)
+        if let index = messages.firstIndex(where: { $0.id == messageID }) { messages[index] = bubble }
+        else { messages.append(bubble) }
     }
     func send(_ text: String, to threadID: String, messageID: String, attachments: [String] = []) async throws {
         if !running {
-            dismissOutgoing(messageID)
             let links = attachments.compactMap { uploadedPaths[$0] }.map { "📎 [" + URL(fileURLWithPath: $0).lastPathComponent + "](<" + $0 + ">)" }
             showOutgoing(text, to: threadID, messageID: messageID, displayText: ([text] + links).joined(separator: "\n"))
         }

@@ -217,8 +217,49 @@ struct CodexChatPreviewModifier: ViewModifier {
             }
         }
         .fullScreenCover(item: photo, onDismiss: onDismiss) { file in
-            CodexImagePreview(url: file.url, close: { preview = nil }).presentationBackground(.ultraThinMaterial)
+            CodexImagePreview(url: file.url, close: { preview = nil }).presentationBackground(.clear)
         }
+    }
+}
+
+// A deliberately weak blur: system material alone obscures the entire chat.
+struct CodexLightBlur: UIViewRepresentable {
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        let view = UIVisualEffectView(effect: nil)
+        view.isUserInteractionEnabled = false
+        let animator = UIViewPropertyAnimator(duration: 1, curve: .linear) { view.effect = UIBlurEffect(style: .regular) }
+        animator.fractionComplete = 0.12
+        context.coordinator.animator = animator
+        return view
+    }
+    func updateUIView(_ view: UIVisualEffectView, context: Context) { }
+    static func dismantleUIView(_ view: UIVisualEffectView, coordinator: Coordinator) { coordinator.animator?.stopAnimation(true) }
+    final class Coordinator { var animator: UIViewPropertyAnimator? }
+}
+
+struct CodexComposerShell<Content: View>: View {
+    @ViewBuilder let content: Content
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 2) { content }
+            .padding(6)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 26))
+            .overlay { RoundedRectangle(cornerRadius: 26).strokeBorder(.primary.opacity(0.07), lineWidth: 0.5) }
+            .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 10)
+    }
+}
+
+struct CodexComposerButtonStyle: ButtonStyle {
+    var primary = false
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.system(size: 19, weight: .semibold))
+            .frame(width: 44, height: 44)
+            .foregroundStyle(primary && enabled ? Color.white : Color.primary.opacity(enabled ? 0.7 : 0.25))
+            .background {
+                if primary { Circle().fill(enabled ? Color.accentColor : Color.primary.opacity(0.08)).padding(3) }
+            }
+            .opacity(configuration.isPressed ? 0.6 : 1)
     }
 }
 
@@ -232,7 +273,8 @@ struct CodexImagePreview: View {
             let width = min(geometry.size.width * 0.82, 560)
             let height = min(geometry.size.height * 0.62, 620)
             ZStack {
-                Color.black.opacity(0.12).ignoresSafeArea().contentShape(Rectangle()).onTapGesture(perform: close)
+                CodexLightBlur().ignoresSafeArea().allowsHitTesting(false)
+                Color.black.opacity(0.10).ignoresSafeArea().contentShape(Rectangle()).onTapGesture(perform: close)
                 VStack(spacing: 10) {
                     HStack {
                         Text(url.lastPathComponent).font(.caption).lineLimit(1).truncationMode(.middle)

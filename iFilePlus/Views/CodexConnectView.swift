@@ -375,6 +375,7 @@ private struct CodexChatContent: View {
     @State private var viewportHeight: CGFloat = 600
     @State private var initialScroll = false
     @State private var followOutput = true
+    @State private var bottomScrollTask: Task<Void, Never>?
     @State private var draft = ""
     @State private var sending = false
     @State private var pendingID: String?
@@ -411,7 +412,9 @@ private struct CodexChatContent: View {
             GeometryReader { viewport in
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
+                    // History is bounded. Measure its actual height so sending / keyboard
+                    // resizing cannot scroll beyond a lazy stack's estimated bottom.
+                    VStack(alignment: .leading, spacing: 16) {
                         HStack {
                             if service.olderCursor != nil { Button("上一页记录") { Task { browsingOlder = true; await service.older(thread.id) } } }
                             Spacer()
@@ -436,11 +439,13 @@ private struct CodexChatContent: View {
                 .defaultScrollAnchor(.bottom)
                 .coordinateSpace(name: "codex-chat-scroll")
                 .onAppear { viewportHeight = viewport.size.height }
-                .onChange(of: viewport.size.height) { _, height in viewportHeight = height }
+                .onChange(of: viewport.size.height) { _, height in viewportHeight = height; scrollToLatest(proxy) }
                 .onPreferenceChange(CodexChatBottomKey.self) { bottom in bottomDistance = max(0, bottom - viewport.size.height); followOutput = bottomDistance < 140 }
                 .onChange(of: service.messages.last?.text) { _, _ in
-                    if !browsingOlder && (followOutput || !initialScroll) { initialScroll = true; Task { await Task.yield(); proxy.scrollTo("bottom", anchor: .bottom) } }
+                    scrollToLatest(proxy)
                 }
+                .onChange(of: service.messages.last?.id) { _, _ in scrollToLatest(proxy) }
+                .onChange(of: sending) { _, _ in scrollToLatest(proxy) }
                 .overlay(alignment: .bottomTrailing) {
                     if bottomDistance > max(600, viewportHeight * 1.25) || browsingOlder {
                         Button { Task {
@@ -469,12 +474,13 @@ private struct CodexChatContent: View {
                 } }.padding(.horizontal) }
             }
             if voiceMode || voice.error != nil { CodexVoicePreview(voice: voice, preferLocal: $preferLocalVoice) }
-            HStack(alignment: .bottom, spacing: 10) {
+            CodexComposerShell {
                 Button {
                     voice.cancel()
                     voiceMode.toggle()
                     composerFocused = !voiceMode
-                } label: { Image(systemName: voiceMode ? "keyboard" : "waveform.circle").font(.title2).frame(minWidth: 32, minHeight: 46) }
+                } label: { Image(systemName: voiceMode ? "keyboard" : "waveform") }
+                    .buttonStyle(CodexComposerButtonStyle())
                     .accessibilityLabel(voiceMode ? "切换键盘输入" : "切换按住说话")
                     .disabled(sending || uncertain)
                 if voiceMode {
@@ -485,18 +491,24 @@ private struct CodexChatContent: View {
                         composerFocused = true
                     }
                 } else {
-                    TextField("发给电脑上的 Codex…", text: $draft, axis: .vertical).lineLimit(1...6).textFieldStyle(.roundedBorder).focused($composerFocused).disabled(sending || uncertain)
+                    TextField("", text: $draft, prompt: Text("发消息…").foregroundColor(Color(uiColor: .secondaryLabel)), axis: .vertical)
+                        .font(.system(size: 17)).lineLimit(1...5).textFieldStyle(.plain)
+                        .frame(minHeight: 44).padding(.horizontal, 6)
+                        .focused($composerFocused).disabled(sending || uncertain)
                 }
                 Menu {
                     Button("选择文件", systemImage: "doc") { importing = true }
                     Button("选择照片", systemImage: "photo") { choosingPhoto = true }
-                } label: { Image(systemName: "plus.circle").font(.title2).frame(minHeight: 46) }.disabled(sending || uncertain || loadingPhoto || attachments.count >= 6 || voice.active)
-                if service.running { Button { Task { await service.stop(thread.id) } } label: { Image(systemName: "stop.circle.fill").font(.title2) }.accessibilityLabel("停止") }
+                } label: { Image(systemName: "plus").font(.system(size: 21, weight: .regular)).foregroundStyle(.secondary).frame(width: 44, height: 44) }
+                    .buttonStyle(.plain).accessibilityLabel("添加照片或文件")
+                    .disabled(sending || uncertain || loadingPhoto || attachments.count >= 6 || voice.active)
+                if service.running { Button { Task { await service.stop(thread.id) } } label: { Image(systemName: "stop.fill").font(.system(size: 15)) }.buttonStyle(CodexComposerButtonStyle()).accessibilityLabel("停止") }
                 if !voiceMode {
-                    Button { Task { await send() } } label: { if sending { ProgressView() } else { Image(systemName: uncertain ? "arrow.clockwise.circle.fill" : "arrow.up.circle.fill").font(.title) } }
+                    Button { Task { await send() } } label: { if sending { ProgressView() } else { Image(systemName: uncertain ? "arrow.clockwise" : "arrow.up") } }
+                        .buttonStyle(CodexComposerButtonStyle(primary: true)).accessibilityLabel(uncertain ? "重试发送" : "发送消息")
                         .disabled(sending || loadingPhoto || !service.connected || !service.writable || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty && uploadedIDs.isEmpty) || browsingOlder)
                 }
-            }.padding()
+            }
             if uncertain { Button("已核实，清除输入") { if let id = pendingID { service.dismissOutgoing(id) }; clearPending(); service.error = nil }.font(.caption).padding(.bottom, 6) }
         }
         .accessibilityHidden(navigationOpen)
@@ -536,6 +548,7 @@ private struct CodexChatContent: View {
             }
         }
         .onDisappear {
+            bottomScrollTask?.cancel()
             voice.cancel(); UserDefaults.standard.set(draft, forKey: draftAccount)
             // Opening the image modal must not clear the underlying chat or detach its stream.
             if preview == nil { service.leaveChat(thread.id) }
@@ -552,6 +565,16 @@ private struct CodexChatContent: View {
             Button("下载") { if let path = pendingDownload { Task { do { _ = try await service.download(projectID: "thread:" + thread.id, path: path, absolute: true) } catch is CancellationError { } catch { service.error = error.localizedDescription } } }; pendingDownload = nil }
             Button("取消", role: .cancel) { pendingDownload = nil }
         } message: { Text(pendingDownload ?? "") }
+    }
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        guard !browsingOlder, preview == nil, followOutput || !initialScroll else { return }
+        initialScroll = true
+        bottomScrollTask?.cancel()
+        bottomScrollTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            proxy.scrollTo("bottom", anchor: .bottom)
+        }
     }
     private var chatNavigationOverlay: some View {
         GeometryReader { geometry in
