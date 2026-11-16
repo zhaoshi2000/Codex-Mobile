@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileCitations } from "./file-citations.mjs";
 
 // A chat grants access to individual assistant-provided links, never to their parent directory.
 export function localLinkPath(value) {
@@ -15,6 +16,10 @@ export function assistantLinks(items) {
   for (const item of items) {
     if ((item.type || "").toLowerCase() !== "agentmessage") continue;
     const text = item.text || item.message || "";
+    for (const citation of fileCitations(text)) {
+      const p = localLinkPath(citation.path);
+      if (p) paths.push(p);
+    }
     for (const m of text.matchAll(/\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s]+))\s*\)/g)) {
       const p = localLinkPath(m[1] || m[2]);
       if (p) paths.push(p);

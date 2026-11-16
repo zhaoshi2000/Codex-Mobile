@@ -1,4 +1,5 @@
 import { parseQuestionReply } from "./questions.mjs";
+import { renderFileCitations } from "./file-citations.mjs";
 export function applyChange(previous, change) {
   if (change?.type === "snapshot")
     return { revision: change.revision, state: change.conversationState };
@@ -91,6 +92,7 @@ export function messages(turns, budget = 230000, includeCommands = false) {
       }
       if (type !== "usermessage" && type !== "agentmessage") continue;
       let text = i.text || i.message || contentText(i.content);
+      if (type === "agentmessage") text = renderFileCitations(text);
       const reply = parseQuestionReply(text);
       if (reply) text = reply.map(r => r.question + "\n" + r.answer).join("\n\n");
       if (!text) continue;
