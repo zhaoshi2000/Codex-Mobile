@@ -8,6 +8,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
+    "build:admin": "vite build --config admin/vite.config.mjs && node admin/embed.mjs",
     "relay": "node src/relay.mjs",
     "bridge": "node src/bridge.mjs",
     "doctor": "node src/doctor.mjs"
@@ -16,5 +17,10 @@
     "qrcode": "1.5.4",
     "sharp": "0.35.5",
     "ws": "8.21.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.4",
+    "vite": "^6.4.6",
+    "vue": "^3.5.45"
   }
 }

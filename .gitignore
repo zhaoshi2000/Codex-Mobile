@@ -25,3 +25,4 @@ Android/local.properties
 *.apk
 *.aab
 Android/node_modules/
+Connect/admin/dist/

@@ -1,4 +1,4 @@
-# AstroGate Connect — 0.4.19-pc2
+# AstroGate Connect — 0.4.31
 
 手机在 AstroGate 管家的 Codex 页选择电脑 → 项目 → 原对话。执行仍由该电脑的 Codex 桌面版负责，使用电脑现有登录和会话设置。无需把 OpenAI 密钥传给手机或中转。
 
@@ -50,13 +50,13 @@
 
 ## 电脑运行
 
-另一台 Windows x64 电脑可以使用同一便携包、同一中转服务；每台电脑分别首次配置并扫码配对。不需要额外安装 Node.js/Python，不需要复制原电脑源码或配置目录。电脑需要保持开机联网并运行 Codex 桌面版。Windows ARM64 尚未验证。
+另一台 Windows x64 电脑可以使用同一安装包、同一中转服务；每台电脑独立生成身份和二维码。不需要额外安装 Node.js/Python，不需要复制原电脑源码或状态目录。电脑需要保持开机联网并运行已登录的 Codex 桌面版。Windows ARM64 尚未验证。
 
-0.4.19-pc2 增加独立安装版和正在运行的 Codex 安装目录识别；原路径因更新失效时会重新查找，只更新可执行文件路径，保留电脑身份与配对。二维码仅保存在用户状态目录，不再复制到桌面。打包可运行 `python Connect/package-windows.py --runtime <包含官方 Windows x64 node.exe 和 LICENSE 的目录>`，依赖须先在 Connect 内安装。
+Windows 安装包内置官方 Node x64 运行时和依赖，能识别商店版及常见独立版 Codex。Codex 更新后如原路径失效，会重新查找可执行文件，保留电脑身份与配对。二维码仅保存在用户状态目录。构建公开包：`python Connect/package-windows.py --runtime <含 node.exe 和 LICENSE 的目录> --version 0.4.31`；私有免配置包另外传入 `--setup-token-file Build/Private/setup/relay.token`。私有包只存放在本地 `Build/Releases`，不得上传公开仓库或分享；公开包没有连接密钥。
 
-Windows x64 便携包解压后，双击 `Open AstroGate Connect.cmd`。它使用包内的 Node.js 和依赖。请先打开并登录 Codex 桌面版。已配置的电脑直接出码，首次配置的电脑输入自己的中转 WSS 地址和连接密钥。密钥和配对状态保存在当前 Windows 用户目录。若需要修改中转配置，先停止当前连接进程，再运行 `"Open AstroGate Connect.cmd" -Configure`。
+Windows x64 ZIP 完整解压后，双击 `安装 AstroGate Connect.cmd`。它安装到当前用户 `%LOCALAPPDATA%\Programs\AstroGate Connect`，创建桌面和开始菜单快捷方式，然后启动配对窗口；后续双击 `AstroGate Connect` 快捷方式即可刷新二维码。默认中转地址为 `wss://1.14.93.149/ifile-connect`。私有包首次启动自动导入随包提供的专用连接密钥，用户不必输入服务器地址或密钥；公开包首次需从中转后台取得专用连接密钥。密钥和配对状态保存在当前 Windows 用户目录 `~/.ifileplus-connect`，安装更新不会覆盖。不要把一台电脑的状态目录复制到另一台。
 
-中转管理员可在 HTTPS 管理页复制 WSS 地址、创建连接密钥，再粘贴到首次配置窗口。现有 Nginx `/ifile-connect/` 路径下，管理页通常是 `https://你的域名/ifile-connect/admin/`。后台登录密码与连接密钥不同，不要在连接窗口输入后台登录密码。新生成的连接密钥只展示一次，后续可撤销；撤销后使用该密钥的电脑需要更新配置。服务器尚未部署新管理服务时，继续使用原来的 WSS 地址和连接密钥。
+中转管理员可在 HTTPS 管理页创建电脑连接密钥。后台登录密码与连接密钥不同；新密钥只在创建时显示一次，后续可撤销。私有安装包的 `setup/relay.token` 是连接密钥，生成后需妥善保管；打包脚本不会把它放进公开包或源码。撤销密钥后，使用该密钥的电脑需要导入新密钥。
 
 手动运行源码时，需要 Node.js 22+，打开且登录 Codex 桌面版。
 
@@ -69,9 +69,9 @@ Windows x64 便携包解压后，双击 `Open AstroGate Connect.cmd`。它使用
 
 Windows 使用 `start.ps1 -Config 完整配置路径` 启动并显示桌面二维码、倒计时和连接设备数量。程序已运行时只刷新配对码，保持原连接；`-Restart` 用于更新代码后显式重启，`stop.ps1` 停止。启动脚本从配置的 stateDir 内 `relay.token` 读取中转密钥；该目录应只允许当前 Windows 用户访问。安装依赖和配置凭据需先完成。关闭二维码窗口不会停止连接。运行 `install-autostart.ps1` 可安装当前用户的 Windows 登录自启，后台 watchdog 每 30 秒检查一次连接进程，并在 Codex 未运行时启动桌面应用。`start.ps1 -EnsureRunning -NoShowQR` 只检查和启动，不刷新已有二维码。不会自动登录 Windows 或修改休眠设置。
 
-0.4.29 Windows 便携包包含登录自启脚本；成功打开连接程序后自动安装当前用户登录自启。请保留解压目录，重启后登录 Windows 并联网，连接程序会自动恢复，原配对保留。未登录 Windows、关机或休眠期间无法连接。旧版便携包需要更新后打开一次。
+0.4.31 安装到固定用户目录，连接成功启动后自动设置当前用户登录自启；自启不依赖解压目录。重启并登录 Windows 后联网即可恢复连接，原配对保留。未登录 Windows、关机或休眠期间无法连接。更新时再次运行新版本安装器。
 
-若需彻底停用自启，删除当前用户“启动”文件夹中的 `iFilePlus Connect.lnk`，停止命令行为本项目 `watchdog.ps1` 的 PowerShell 进程，再运行 `stop.ps1`。仅 stop 会被 watchdog 恢复。
+若需彻底停用自启，删除当前用户“启动”文件夹中的 `AstroGate Connect.lnk`，停止命令行为本项目 `watchdog.ps1` 的 PowerShell 进程，再运行已安装目录中的 `stop.ps1`。仅 stop 会被 watchdog 恢复。
 
 每台电脑使用独立 stateDir（默认用户目录 `.ifileplus-connect`）。该目录包含私钥和配对信任记录，禁止上传仓库或共享。手机保存电脑公钥，公钥改变必须先核实并移除旧设备。
 
@@ -82,6 +82,8 @@ Windows 使用 `start.ps1 -Config 完整配置路径` 启动并显示桌面二�
 Dockerfile 只包含 Node 中转代码。设置随机 32 字符以上的 `IFILE_RELAY_TOKEN` 作为兼容旧电脑的连接密钥；管理后台另设 `IFILE_RELAY_ADMIN_USERNAME` 和 `IFILE_RELAY_ADMIN_PASSWORD`，不得与连接密钥相同。容器端口 8787 只绑定服务器回环地址，前面用已有 HTTPS 反向代理。不要直接把未加 TLS 的中转端口开放到公网。
 
 管理后台使用同一 HTTPS 入口的 `/ifile-connect/admin/`。启动中转时设置 `IFILE_RELAY_ADMIN_USERNAME`（默认 `admin`，允许 1–64 位字母、数字、点、下划线或连字符）、`IFILE_RELAY_ADMIN_PASSWORD`（至少 8 个字符）、`IFILE_RELAY_CONFIG_PATH=/data/relay-admin.json` 和 `IFILE_RELAY_PUBLIC_WSS=wss://你的域名/ifile-connect`；将服务器上的持久目录挂载为容器 `/data`，并给容器用户写权限。浏览器使用配置的用户名和单独的后台密码登录。修改用户名后，旧用户名立即失效；浏览器可能缓存旧的 Basic 登录信息，需重新登录。后台可复制 WSS 地址、查看在线连接数、创建或停用电脑连接密钥。新密钥仅在创建时展示一次，配置文件只保存其 SHA-256 摘要；原 `IFILE_RELAY_TOKEN` 继续有效，旧电脑不用重新配对。停用密钥后，该电脑下一次连接会被拒绝，需在电脑端更新密钥。修改页面中的 WSS 地址只改变提供给电脑复制的地址；域名、证书和 Nginx 路由仍需在服务器配置。
+
+管理界面使用 Vue 3 和 Vite，源代码在 `Connect/admin/`。在 `Connect` 目录运行 `npm ci`、`npm run build:admin`，会生成自包含的 `Connect/src/relay-admin-page.mjs`；Docker 镜像只需复制生成的 `src`，运行时无需 CDN。每次修改 Vue 界面后都要重新构建该文件再部署。Windows 私有安装包可预置本站 WSS 地址和独立随机连接密钥，电脑首次打开即可生成配对码；不要将带有私有配置的包公开。
 
 若启用独立语音中转，给语音容器只读挂载同一 `/data/relay-admin.json` 并设置相同的 `IFILE_RELAY_CONFIG_PATH`，新密钥才能用于语音输入；停用新密钥对语音请求立即生效。后台密码、连接密钥和私有配置目录不得上传源码仓库。
 
