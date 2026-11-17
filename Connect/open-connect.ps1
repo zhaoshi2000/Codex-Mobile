@@ -96,6 +96,7 @@ try {
     }
     if (!(Test-Path -LiteralPath $configPath)) { return }
     & (Join-Path $PSScriptRoot 'start.ps1') -Config $configPath
+    & (Join-Path $PSScriptRoot 'install-autostart.ps1') -Config $configPath | Out-Null
 } catch {
     $message = "请确认 Codex 桌面版已登录并在运行，中转服务可用。`n`n" + $_.Exception.Message
     [void][Windows.Forms.MessageBox]::Show($message, 'AstroGate Connect 启动失败')

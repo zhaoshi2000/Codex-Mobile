@@ -1,19 +1,17 @@
 param([string]$Config = "$env:USERPROFILE\.ifileplus-connect\bridge.config.json")
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'find-codex.ps1')
 $mutex = New-Object Threading.Mutex($false, 'Local\iFilePlusConnectWatchdog')
-if (!$mutex.WaitOne(0)) { $mutex.Dispose(); exit }
+$locked = $false
+try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
+if (!$locked) { $mutex.Dispose(); exit }
 try {
     while ($true) {
         try {
             $settings = Get-Content -LiteralPath $Config -Raw -Encoding UTF8 | ConvertFrom-Json
-            $package = Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1
-            if ($package) {
-                $cli = Join-Path $package.InstallLocation 'app\resources\codex.exe'
-                if ((Test-Path -LiteralPath $cli) -and $settings.codexExecutable -ne $cli) {
-                    $settings.codexExecutable = $cli
-                    [IO.File]::WriteAllText($Config, ($settings | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
-                }
-                $desktop = Join-Path $package.InstallLocation 'app\Codex.exe'
+            $cli = Find-CodexExecutable -Preferred $settings.codexExecutable
+            if ($cli) {
+                $desktop = Join-Path (Split-Path (Split-Path $cli -Parent) -Parent) 'Codex.exe'
                 $running = Get-CimInstance Win32_Process -Filter "Name='Codex.exe'" | Where-Object { $_.ExecutablePath -eq $desktop }
                 if (!$running -and (Test-Path -LiteralPath $desktop)) {
                     Start-Process -FilePath $desktop -WindowStyle Hidden

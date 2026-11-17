@@ -67,6 +67,8 @@ Windows x64 便携包解压后，双击 `Open AstroGate Connect.cmd`。它使用
 
 Windows 使用 `start.ps1 -Config 完整配置路径` 启动并显示桌面二维码、倒计时和连接设备数量。程序已运行时只刷新配对码，保持原连接；`-Restart` 用于更新代码后显式重启，`stop.ps1` 停止。启动脚本从配置的 stateDir 内 `relay.token` 读取中转密钥；该目录应只允许当前 Windows 用户访问。安装依赖和配置凭据需先完成。关闭二维码窗口不会停止连接。运行 `install-autostart.ps1` 可安装当前用户的 Windows 登录自启，后台 watchdog 每 30 秒检查一次连接进程，并在 Codex 未运行时启动桌面应用。`start.ps1 -EnsureRunning -NoShowQR` 只检查和启动，不刷新已有二维码。不会自动登录 Windows 或修改休眠设置。
 
+0.4.29 Windows 便携包包含登录自启脚本；成功打开连接程序后自动安装当前用户登录自启。请保留解压目录，重启后登录 Windows 并联网，连接程序会自动恢复，原配对保留。未登录 Windows、关机或休眠期间无法连接。旧版便携包需要更新后打开一次。
+
 若需彻底停用自启，删除当前用户“启动”文件夹中的 `iFilePlus Connect.lnk`，停止命令行为本项目 `watchdog.ps1` 的 PowerShell 进程，再运行 `stop.ps1`。仅 stop 会被 watchdog 恢复。
 
 每台电脑使用独立 stateDir（默认用户目录 `.ifileplus-connect`）。该目录包含私钥和配对信任记录，禁止上传仓库或共享。手机保存电脑公钥，公钥改变必须先核实并移除旧设备。

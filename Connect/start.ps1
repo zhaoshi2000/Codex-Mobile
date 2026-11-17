@@ -12,6 +12,8 @@ $nodePath = if (Test-Path -LiteralPath $bundledNode) { $bundledNode } else { (Ge
 if (Test-Path -LiteralPath $pidFile) {
     $savedPid = [int](Get-Content -LiteralPath $pidFile -Raw)
     $old = Get-CimInstance Win32_Process -Filter "ProcessId=$savedPid"
+    # Windows can reuse a saved PID after reboot. Never stop the unrelated process.
+    if ($old -and ($old.Name -ne 'node.exe' -or $old.CommandLine -notmatch '\\src\\bridge\.mjs')) { $old = $null }
     if ($old) {
         # A portable copy may refresh the existing bridge for the same configuration.
         $bridgeArguments = '\s+"[^"\r\n]+\\src\\bridge\.mjs"\s+"' + [regex]::Escape($configPath) + '"\s*$'
