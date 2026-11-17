@@ -20,6 +20,7 @@ fail() { echo "错误：$*" >&2; exit 1; }
 command -v xcodebuild >/dev/null 2>&1 || fail "未找到 xcodebuild。请安装 Xcode，并至少启动一次完成初始化。"
 command -v security >/dev/null 2>&1 || fail "未找到 macOS security 命令。"
 command -v python3 >/dev/null 2>&1 || fail "未找到 python3。"
+python3 "$ROOT/scripts/build-zerotier.py"
 [[ -d "$PROJECT" ]] || fail "找不到 Xcode 工程：$PROJECT"
 [[ -f "$P12" ]] || fail "缺少签名证书：$P12"
 [[ -f "$PROFILE" ]] || fail "缺少描述文件：$PROFILE"

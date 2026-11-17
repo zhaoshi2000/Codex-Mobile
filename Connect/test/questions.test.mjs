@@ -23,6 +23,16 @@ test('answers reject stale/foreign requests and uncertain delivery is never repl
  const g=new Gateway({ipc,rpc:{call:async()=>({thread:{cwd:dir}})},roots:[dir],stateDir:dir});await g.init();t.after(()=>g.close());
  const peer={id:'phone',publicKey:'key'};await g.handle('watch',{threadId:'thread-123456'},peer);const state=fixture();g.states.set('thread-123456',{state,revision:1});const group=questionGroups(state,desktopTurns(state))[0];
  const p={threadId:'thread-123456',groupId:group.id,messageId:'message-1234567890',answers:{[group.questions[0].id]:'测试'}};
+ assert.equal((await g.handle('answerStatus',p,peer)).state,'notSubmitted');
  const [a,b]=await Promise.all([g.handle('answer',p,peer),g.handle('answer',p,peer)]);assert.equal(count,1);assert.equal(a.state,'unknown');assert.equal(b.state,'unknown');await assert.rejects(g.handle('answer',{...p,messageId:'different-message-123456'},peer));assert.equal(count,1);
+ assert.equal((await g.handle('answerStatus',p,peer)).state,'unknown');assert.equal(count,1);
+ await assert.rejects(g.handle('answerStatus',p,{id:'other',publicKey:'foreign'}));
  await assert.rejects(g.handle('answer',{...p,messageId:'message-1234567891',groupId:'stale'},peer));await assert.rejects(g.handle('answer',p,{id:'other',publicKey:'foreign'}));
+});
+test('explicit skipped answers reach the original question without selecting an option',()=>{
+ const s=fixture(), turns=desktopTurns(s), group=questionGroups(s,turns)[0];
+ const response=questionAnswer(group,{[group.questions[0].id]:'用户跳过此问题，未提供答案。'});
+ assert.ok(!response.includes('"answer":"生产"'));
+ turns[0].items.push({type:'steeringUserMessage',status:'accepted',input:[{type:'text',text:response}]});
+ assert.equal(questionGroups(s,turns).length,0);
 });

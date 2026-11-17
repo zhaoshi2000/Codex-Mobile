@@ -49,7 +49,7 @@ final class RemoteBrowserModel: ObservableObject {
         defer { isLoading = false }
         do {
             if connection.type == .ftp {
-                let client = FTPClient(host: connection.host, port: connection.port)
+                let client = FTPClient(host: connection.host, port: connection.port, useZeroTier: connection.useZeroTier == true)
                 try await client.connect(username: connection.username, password: password)
                 ftp = client
                 isConnected = true

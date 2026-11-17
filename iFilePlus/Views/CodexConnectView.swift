@@ -578,7 +578,8 @@ private struct CodexChatContent: View {
         .photosPicker(isPresented: $choosingPhoto, selection: $photo, matching: .images, preferredItemEncoding: .current)
         .onChange(of: photo) { _, item in Task { await addPhoto(item) } }
         .alert("下载电脑文件？", isPresented: Binding(get: { pendingDownload != nil }, set: { if !$0 { pendingDownload = nil } })) {
-            Button("下载") { if let path = pendingDownload { Task { do { _ = try await service.download(projectID: "thread:" + thread.id, path: path, absolute: true) } catch is CancellationError { } catch { service.error = error.localizedDescription } } }; pendingDownload = nil }
+            Button("服务器中转下载") { if let path = pendingDownload { Task { do { _ = try await service.download(projectID: "thread:" + thread.id, path: path, absolute: true) } catch is CancellationError { } catch { service.error = error.localizedDescription } } }; pendingDownload = nil }
+            Button("ZeroTier 直连下载") { if let path = pendingDownload { Task { do { _ = try await service.download(projectID: "thread:" + thread.id, path: path, absolute: true, direct: true) } catch is CancellationError { } catch { service.error = error.localizedDescription } } }; pendingDownload = nil }
             Button("取消", role: .cancel) { pendingDownload = nil }
         } message: { Text(pendingDownload ?? "") }
     }
@@ -745,7 +746,10 @@ private struct CodexFilesView: View {
             if let notice { Text(notice).font(.footnote).textSelection(.enabled) }
             ForEach(files) { file in
                 if file.directory { NavigationLink { CodexFilesView(service: service, project: project, path: file.path, title: file.title) } label: { Label(file.title, systemImage: "folder") } }
-                else { Button { download(file) } label: { HStack { Label(file.title, systemImage: "arrow.down.doc"); Spacer(); Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file)).font(.caption).foregroundStyle(.secondary) } }.disabled(service.downloadProgress != nil) }
+                else { Menu {
+                    Button("服务器中转下载") { download(file) }
+                    Button("ZeroTier 直连下载") { download(file, direct: true) }
+                } label: { HStack { Label(file.title, systemImage: "arrow.down.doc"); Spacer(); Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file)).font(.caption).foregroundStyle(.secondary) } }.disabled(service.downloadProgress != nil) }
             }
             if limited { Text("此目录仅显示前 200 项，请在电脑整理子目录后查看。").font(.footnote).foregroundStyle(.secondary) }
         }
@@ -756,5 +760,5 @@ private struct CodexFilesView: View {
             files = (r["files"] as? [[String: Any]] ?? []).compactMap { x in guard let name = x["name"] as? String, let path = x["relativePath"] as? String else { return nil }; return CodexRow(id: path, title: name, path: path, directory: x["isDirectory"] as? Bool ?? false, size: x["size"] as? Int ?? 0) }.sorted { $0.directory != $1.directory ? $0.directory : $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         } catch { notice = error.localizedDescription }
     }
-    private func download(_ file: CodexRow) { downloading = Task { do { _ = try await service.download(projectID: project.id, path: file.path); notice = nil } catch is CancellationError { notice = "下载已取消" } catch { notice = error.localizedDescription } } }
+    private func download(_ file: CodexRow, direct: Bool = false) { downloading = Task { do { _ = try await service.download(projectID: project.id, path: file.path, direct: direct); notice = nil } catch is CancellationError { notice = "下载已取消" } catch { notice = error.localizedDescription } } }
 }

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+python3 scripts/build-zerotier.py
+
 : "${RUNNER_TEMP:?This script runs on a macOS GitHub Actions runner}"
 : "${IOS_P12_BASE64:?Missing P12 secret}"
 : "${IOS_P12_PASSWORD:?Missing P12 password secret}"

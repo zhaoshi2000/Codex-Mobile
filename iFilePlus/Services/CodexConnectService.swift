@@ -569,11 +569,11 @@ extension Data {
         currentModel = current["model"] as? String ?? model; currentEffort = current["reasoningEffort"] as? String ?? ""
     }
     func stop(_ threadID: String) async { do { _ = try await request("stop", ["threadId": threadID, "turnId": turnID ?? ""]) } catch { self.error = error.localizedDescription } }
-    func download(projectID: String, path: String, absolute: Bool = false, preview: Bool = false) async throws -> URL {
+    func download(projectID: String, path: String, absolute: Bool = false, preview: Bool = false, direct: Bool = false) async throws -> URL {
         guard downloadTask == nil else { throw CodexConnectError(message: "已有文件正在下载，请等待完成或取消后重试") }
         downloadState = CodexDownloadState(name: path.replacingOccurrences(of: "\\", with: "/").components(separatedBy: "/").last ?? "文件", preview: preview)
         downloadProgress = 0
-        let task = Task { try await self.performDownload(projectID: projectID, path: path, absolute: absolute, preview: preview) }
+        let task = Task { try await self.performDownload(projectID: projectID, path: path, absolute: absolute, preview: preview, direct: direct) }
         downloadTask = task
         defer { downloadTask = nil; downloadProgress = nil }
         do {
@@ -587,9 +587,10 @@ extension Data {
     }
     func cancelDownload() { downloadTask?.cancel(); if downloadTask != nil { downloadState?.phase = .cancelling } }
     func dismissDownload() { if downloadState?.active != true { downloadState = nil } }
-    private func performDownload(projectID: String, path: String, absolute: Bool, preview: Bool) async throws -> URL {
+    private func performDownload(projectID: String, path: String, absolute: Bool, preview: Bool, direct: Bool) async throws -> URL {
         try Task.checkCancellation()
-        let info = try await request("filePrepare", ["projectId": projectID, absolute ? "absolutePath" : "relativePath": path])
+        if direct, !ZeroTierService.shared.ready { throw CodexConnectError(message: "请先在服务 → ZeroTier 中启用网络并完成授权") }
+        let info = try await request("filePrepare", ["projectId": projectID, absolute ? "absolutePath" : "relativePath": path, "direct": direct])
         guard let id = info["id"] as? String, let size = info["size"] as? Int, size >= 0, size <= 200 * 1024 * 1024,
               let name = info["name"] as? String, let expected = info["sha256"] as? String else { throw CodexConnectError(message: "文件信息无效") }
         defer { Task { _ = try? await request("fileRelease", ["fileId": id]) } }
@@ -600,6 +601,28 @@ extension Data {
         defer { try? FileManager.default.removeItem(at: temp) }
         let file = try FileHandle(forWritingTo: temp); defer { try? file.close() }
         var offset = 0; var hash = SHA256()
+        if direct {
+            guard let route = info["direct"] as? [String: Any], let host = route["host"] as? String,
+                  let port = route["port"] as? Int, let target = route["path"] as? String,
+                  port > 0, port <= 65535, target.range(of: "^/[0-9a-f]{64}$", options: .regularExpression) != nil
+            else { throw CodexConnectError(message: "电脑不支持 ZeroTier 下载，请更新连接程序") }
+            let tunnel = try await ZeroTierService.shared.tunnel(host: host, port: UInt16(port))
+            defer { tunnel.cancel() }
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = 30; config.timeoutIntervalForResource = 600
+            let session = URLSession(configuration: config); defer { session.invalidateAndCancel() }
+            let url = URL(string: "http://127.0.0.1:\(tunnel.port)\(target)")!
+            let (downloaded, response) = try await session.download(from: url)
+            defer { try? FileManager.default.removeItem(at: downloaded) }
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  (try FileManager.default.attributesOfItem(atPath: downloaded.path)[.size] as? NSNumber)?.intValue == size
+            else { throw CodexConnectError(message: "直连下载失败或文件长度不符") }
+            let source = try FileHandle(forReadingFrom: downloaded); defer { try? source.close() }
+            while let bytes = try source.read(upToCount: 192 * 1024), !bytes.isEmpty {
+                try Task.checkCancellation(); try file.write(contentsOf: bytes); hash.update(data: bytes); offset += bytes.count
+            }
+            downloadProgress = 1; downloadState?.received = offset
+        }
         while offset < size {
             try Task.checkCancellation()
             let chunk = try await request("fileChunk", ["fileId": id, "offset": offset])

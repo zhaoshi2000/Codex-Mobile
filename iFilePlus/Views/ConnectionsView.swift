@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum ConnectionAddKind: String, Identifiable, CaseIterable {
-    case sftp = "SFTP", ssh = "SSH", openClaw = "OpenClaw"
+    case ftp = "FTP", sftp = "SFTP", ssh = "SSH", openClaw = "OpenClaw"
     var id: String { rawValue }
 }
 
@@ -11,9 +11,13 @@ struct ConnectionsView: View {
     @State private var adding: ConnectionAddKind?
     @State private var editing: ServerConnection?
     @State private var deleting: ServerConnection?
-    private var visible: [ServerConnection] { store.connections.filter { $0.type != .ftp } }
+    private var visible: [ServerConnection] { store.connections }
     var body: some View {
         List {
+            Section {
+                NavigationLink { ZeroTierSettingsView() } label: { Label("ZeroTier", systemImage: "network") }
+                NavigationLink { HostWebServicesView() } label: { Label("主机网页服务", systemImage: "globe") }
+            }
             Section {
                 NavigationLink {
                     FileBrowserView(directory: LocalFileService.documentsDirectory, isRoot: true)
@@ -24,7 +28,7 @@ struct ConnectionsView: View {
             if !visible.isEmpty {
                 Section("服务器服务") {
                     ForEach(visible) { connection in
-                        if connection.type == .sftp {
+                        if connection.type == .sftp || connection.type == .ftp {
                             NavigationLink { RemoteBrowserView(connection: connection) } label: { serverLabel(connection) }
                                 .contextMenu { actions(connection) }
                         } else {
@@ -34,7 +38,7 @@ struct ConnectionsView: View {
                     }
                 }
             } else {
-                Section("服务器服务") { Text("点击右上角 + 添加 SSH、SFTP 或 OpenClaw 服务。").foregroundStyle(.secondary) }
+                Section("服务器服务") { Text("点击右上角 + 添加 FTP、SFTP、SSH 或 OpenClaw 服务。").foregroundStyle(.secondary) }
             }
         }
         .navigationTitle("服务")
@@ -42,7 +46,7 @@ struct ConnectionsView: View {
             Menu { ForEach(ConnectionAddKind.allCases) { kind in Button("添加 " + kind.rawValue) { adding = kind } } }
             label: { Image(systemName: "plus.circle.fill").font(.title2) }.accessibilityLabel("添加服务")
         } }
-        .sheet(item: $adding) { kind in NavigationStack { ConnectionEditorView(defaultType: kind == .sftp ? .sftp : .ssh, openClawSetup: kind == .openClaw) } }
+        .sheet(item: $adding) { kind in NavigationStack { ConnectionEditorView(defaultType: kind == .ftp ? .ftp : kind == .sftp ? .sftp : .ssh, openClawSetup: kind == .openClaw) } }
         .sheet(item: $editing) { connection in NavigationStack { ConnectionEditorView(connection: connection) } }
         .alert("删除连接", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("取消", role: .cancel) { deleting = nil }
@@ -51,7 +55,7 @@ struct ConnectionsView: View {
     }
     private func serverLabel(_ connection: ServerConnection) -> some View {
         Label { VStack(alignment: .leading, spacing: 4) { Text(connection.name).font(.headline); Text(connection.address).font(.caption).foregroundStyle(.secondary) } }
-        icon: { Image(systemName: connection.type == .sftp ? "folder" : "server.rack").foregroundStyle(.blue) }
+        icon: { Image(systemName: connection.type == .ssh ? "server.rack" : "folder").foregroundStyle(.blue) }
     }
     @ViewBuilder private func actions(_ connection: ServerConnection) -> some View {
         Button("编辑连接", systemImage: "pencil") { editing = connection }
@@ -79,6 +83,7 @@ struct ConnectionEditorView: View {
     @State private var password = ""
     @State private var privateKeyText = ""
     @State private var initialPath = "/"
+    @State private var useZeroTier = false
     @State private var showPassword = false
     @State private var showKeyImporter = false
     @State private var showError = false
@@ -99,6 +104,7 @@ struct ConnectionEditorView: View {
         _port = State(initialValue: String(connection?.port ?? defaultType.defaultPort))
         _username = State(initialValue: connection?.username ?? "")
         _initialPath = State(initialValue: connection?.initialPath ?? "/")
+        _useZeroTier = State(initialValue: connection?.useZeroTier ?? false)
     }
 
     private var needsPassword: Bool {
@@ -109,7 +115,7 @@ struct ConnectionEditorView: View {
         Form {
             Section("连接类型") {
                 Picker("协议", selection: $type) {
-                    ForEach([ConnectionType.sftp, .ssh]) { item in
+                    ForEach([ConnectionType.ftp, .sftp, .ssh]) { item in
                         Text(item.rawValue).tag(item)
                     }
                 }
@@ -196,6 +202,10 @@ struct ConnectionEditorView: View {
             }
 
             if type == .ftp {
+                Section("连接通道") {
+                    Toggle("通过内置 ZeroTier 连接", isOn: $useZeroTier)
+                    Text("开启后使用主机的 ZeroTier IP；请先在服务 → ZeroTier 中加入网络。").font(.caption).foregroundStyle(.secondary)
+                }
                 Section {
                     Label("普通 FTP 不加密账号密码和文件内容。", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
@@ -291,6 +301,7 @@ struct ConnectionEditorView: View {
             initialPath: initialPath.isEmpty ? "/" : initialPath,
             trustedHostKey: trustedKey,
             authenticationMode: authMode,
+            useZeroTier: type == .ftp && useZeroTier,
             openClawAlias: String(chatAlias.prefix(16)),
             openClawExecutable: clawExecutable.isEmpty ? "openclaw" : clawExecutable,
             openClawContainer: clawContainer,

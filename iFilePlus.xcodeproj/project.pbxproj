@@ -52,6 +52,12 @@
 		AF0222000000000000000001 /* CodexNavigationCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0222000000000000000002; };
 		AF0223000000000000000001 /* CodexVoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0223000000000000000002; };
 		AF0224000000000000000001 /* CodexDictationSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0224000000000000000002; };
+		0396FFEFAEF64AE8A978BE0C /* ZeroTierService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 223FD3B39E3047C9AA3887AF; };
+		D9565CC88BC34E14BEF0BBF3 /* HostServiceProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7FA94F3299144CE8D9F821D; };
+		E2AD2103B77C47A685E65FB8 /* ZeroTierSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6530ECBD4C4C42BE936155BA; };
+		5A0F2A89DF544E2B91300489 /* HostWebServicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4CDFF6639C444AEA77B3DFF; };
+		ECB140957AA04E41A27D9A8D /* zt in Frameworks */ = {isa = PBXBuildFile; fileRef = 98D3F153E4B7474FB6C7E923; };
+		73324CEB89264D36A6365413 /* notices in Resources */ = {isa = PBXBuildFile; fileRef = 2C2FD329F2BF468BBBC4CDFF; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -98,10 +104,17 @@
 		AF0222000000000000000002 /* CodexNavigationCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexNavigationCache.swift; sourceTree = "<group>"; };
 		AF0223000000000000000002 /* CodexVoiceInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexVoiceInput.swift; sourceTree = "<group>"; };
 		AF0224000000000000000002 /* CodexDictationSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexDictationSession.swift; sourceTree = "<group>"; };
+		223FD3B39E3047C9AA3887AF /* ZeroTierService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZeroTierService.swift; sourceTree = "<group>"; };
+		B7FA94F3299144CE8D9F821D /* HostServiceProxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostServiceProxy.swift; sourceTree = "<group>"; };
+		6530ECBD4C4C42BE936155BA /* ZeroTierSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZeroTierSettingsView.swift; sourceTree = "<group>"; };
+		F4CDFF6639C444AEA77B3DFF /* HostWebServicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostWebServicesView.swift; sourceTree = "<group>"; };
+		98D3F153E4B7474FB6C7E923 /* zt.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = Build/ZeroTier/zt.xcframework; sourceTree = SOURCE_ROOT; };
+		2C2FD329F2BF468BBBC4CDFF /* ZeroTierNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = iFilePlus/ZeroTierNotices.txt; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		BF23F61F1EC1433CBA39F549 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (
+			ECB140957AA04E41A27D9A8D,
 			BF0229000000000000000003,
 			6C5D7CD4CFA6489B8C7AFE7A,
 			155DC274D77248A4BFF51EC2,
@@ -112,6 +125,8 @@
 
 /* Begin PBXGroup section */
 		D2D4B311929C4AD1821C3523 = {isa = PBXGroup; children = (
+			2C2FD329F2BF468BBBC4CDFF,
+			98D3F153E4B7474FB6C7E923,
 			F2E404BDEEE84CA28E2127DF /* iFilePlus */,
 			23B79147DF2F414BBD5D181B /* Products */,
 		); sourceTree = "<group>"; };
@@ -129,6 +144,8 @@
 			82923374C26B46FE8B94A9CB /* ServerConnection.swift */,
 		); };
 		9E5AF0DCC73A4162BBF9B191 /* Services */ = {isa = PBXGroup; path = Services; sourceTree = "<group>"; children = (
+			B7FA94F3299144CE8D9F821D,
+			223FD3B39E3047C9AA3887AF,
 			19A83850564B46F8A4B16DA3,
 			8E4766C68A4445298A92C65D,
 			3AB18EE9E5024A1BA2E1C835,
@@ -151,6 +168,8 @@
 			8D7DD9C88F4C4E4D99D855EA /* SSHService.swift */,
 		); };
 		4393AE7A541944C2B9145832 /* Views */ = {isa = PBXGroup; path = Views; sourceTree = "<group>"; children = (
+			F4CDFF6639C444AEA77B3DFF,
+			6530ECBD4C4C42BE936155BA,
 			AF0470000000000000000002,
 			B544B07E24A44790A4793EFD,
 			7129BAEC474044109365C398,
@@ -211,11 +230,16 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		87B45FF97269459DAD0BD7BF /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (8FE1F4C7B3D4478AA201E001 /* Assets.xcassets in Resources */,); runOnlyForDeploymentPostprocessing = 0; };
+		87B45FF97269459DAD0BD7BF /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (
+			73324CEB89264D36A6365413,8FE1F4C7B3D4478AA201E001 /* Assets.xcassets in Resources */,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		17B1B07EF8CD4221A4ABD237 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+			5A0F2A89DF544E2B91300489,
+			E2AD2103B77C47A685E65FB8,
+			D9565CC88BC34E14BEF0BBF3,
+			0396FFEFAEF64AE8A978BE0C,
 			AF0470000000000000000001,
 			AF0480000000000000000001,
 			AF0222000000000000000001,
@@ -283,6 +307,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
+				OTHER_LDFLAGS = ("$(inherited)", "-lc++");
 
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_TESTABILITY = YES;
@@ -296,6 +321,7 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
+				OTHER_LDFLAGS = ("$(inherited)", "-lc++");
 
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -311,15 +337,16 @@
 				"CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]" = NO;
 				DEVELOPMENT_TEAM = YOUR_TEAM_ID;
 				PROVISIONING_PROFILE_SPECIFIER = "YOUR_PROFILE_NAME";
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 37;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iFilePlus/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.4.29;
+				MARKETING_VERSION = 0.4.30;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.AstroGate;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_VERSION = 5.0;
+				OTHER_LDFLAGS = ("$(inherited)", "-lc++");
 				TARGETED_DEVICE_FAMILY = "1,2";
 
 				DEBUG = 1;
@@ -336,15 +363,16 @@
 				"CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]" = NO;
 				DEVELOPMENT_TEAM = YOUR_TEAM_ID;
 				PROVISIONING_PROFILE_SPECIFIER = "YOUR_PROFILE_NAME";
-				CURRENT_PROJECT_VERSION = 36;
+				CURRENT_PROJECT_VERSION = 37;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = iFilePlus/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.4.29;
+				MARKETING_VERSION = 0.4.30;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.AstroGate;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_VERSION = 5.0;
+				OTHER_LDFLAGS = ("$(inherited)", "-lc++");
 				TARGETED_DEVICE_FAMILY = "1,2";
 
 				SWIFT_COMPILATION_MODE = wholemodule;

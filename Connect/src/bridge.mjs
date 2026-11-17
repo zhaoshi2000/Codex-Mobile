@@ -105,6 +105,7 @@ export class Bridge {
           return;
         }
         if (m.type === "left") {
+          this.gateway.networkTunnels?.closeOwner(this.peers.get(m.peerId)?.publicKey);
           this.gateway.unwatch(m.peerId);
           this.peers.delete(m.peerId);
           this.challenges.delete(m.peerId);
@@ -121,12 +122,14 @@ export class Bridge {
               message: "连接验证失败，请重新配对",
             });
             this.gateway.unwatch(m.peerId);
+            this.gateway.networkTunnels?.closeOwner(this.peers.get(m.peerId)?.publicKey);
             this.peers.delete(m.peerId);
             this.challenges.delete(m.peerId);
           });
         this.queues.set(m.peerId, next);
       });
       ws.on("close", () => {
+        for (const peer of this.peers.values()) this.gateway.networkTunnels?.closeOwner(peer.publicKey);
         for (const id of this.peers.keys()) this.gateway.unwatch(id);
         this.peers.clear();
         if (!this.stopping) {

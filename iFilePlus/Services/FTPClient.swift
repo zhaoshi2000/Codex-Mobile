@@ -11,17 +11,20 @@ final class FTPClient {
     private var control: NWConnection?
     private var controlBuffer = Data()
     private var isLoggedIn = false
+    private let useZeroTier: Bool
+    private var directTunnels: [ZeroTierTunnel] = []
 
-    init(host: String, port: Int) {
+    init(host: String, port: Int, useZeroTier: Bool = false) {
         self.host = host
         self.port = port
+        self.useZeroTier = useZeroTier
     }
 
     func connect(username: String, password: String) async throws {
         guard let nwPort = NWEndpoint.Port(rawValue: UInt16(clamping: port)) else {
             throw FTPError.invalidPort
         }
-        let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
+        let connection = try await makeConnection(port: nwPort)
         control = connection
         try await waitUntilReady(connection)
 
@@ -196,6 +199,17 @@ final class FTPClient {
         control = nil
         controlBuffer.removeAll()
         isLoggedIn = false
+        directTunnels.forEach { $0.cancel() }; directTunnels.removeAll()
+    }
+
+    private func makeConnection(port: NWEndpoint.Port) async throws -> NWConnection {
+        if useZeroTier {
+            directTunnels.removeAll { $0.isClosed }
+            let tunnel = try await ZeroTierService.shared.tunnel(host: host, port: port.rawValue)
+            directTunnels.append(tunnel)
+            return NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: tunnel.port)!, using: .tcp)
+        }
+        return NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
     }
 
     // MARK: - Control channel
@@ -270,7 +284,7 @@ final class FTPClient {
             dataPort = parsed
         }
         guard let nwPort = NWEndpoint.Port(rawValue: UInt16(clamping: dataPort)) else { throw FTPError.invalidPort }
-        let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
+        let connection = try await makeConnection(port: nwPort)
         try await waitUntilReady(connection)
         return connection
     }

@@ -53,6 +53,7 @@ struct ServerConnection: Identifiable, Codable, Hashable {
     var trustedHostKey: String? = nil
     /// Optional for backwards compatibility with 0.1.0 saved configurations.
     var authenticationMode: SSHAuthenticationMode? = nil
+    var useZeroTier: Bool? = nil
 
     var effectiveAuthenticationMode: SSHAuthenticationMode {
         authenticationMode ?? .password

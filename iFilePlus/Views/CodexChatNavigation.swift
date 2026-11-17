@@ -153,6 +153,9 @@ struct CodexChatGroupView: View {
     let openImages: (String, [String]) -> Void
     let fork: (CodexChatMessage) -> Void
     @State private var copied = false
+    @State private var webURL: URL?
+    @State private var webPage: HostWebPage?
+    @Environment(\.openURL) private var systemOpenURL
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(group.blocks) { block in
@@ -171,6 +174,7 @@ struct CodexChatGroupView: View {
                         .background(group.isUser ? Color.blue.opacity(0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
                         .environment(\.openURL, OpenURLAction { url in
                             if url.scheme == "ifilepc", let data = Data(codexBase64URL: url.lastPathComponent), let path = String(data: data, encoding: .utf8) { openFile(path); return .handled }
+                            if HostWebPage.isHostService(url) { webURL = url; return .handled }
                             if ["https", "http", "mailto"].contains(url.scheme ?? "") { return .systemAction }
                             return .discarded
                         })
@@ -192,6 +196,23 @@ struct CodexChatGroupView: View {
                 }.font(.system(size: 13)).buttonStyle(.plain).foregroundStyle(.secondary).padding(.top, 2)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
+        .confirmationDialog("打开主机网页", isPresented: Binding(get: { webURL != nil }, set: { if !$0 { webURL = nil } })) {
+            if let url = webURL {
+                Button("服务器中转打开") { webPage = HostWebPage(url: url, device: service.device, directHost: nil); webURL = nil }
+                Button("ZeroTier 直连打开") {
+                    webURL = nil
+                    Task {
+                        do {
+                            let info = try await service.request("networkInfo")
+                            guard let host = (info["zeroTierAddresses"] as? [String])?.first else { throw CodexConnectError(message: "电脑尚未加入 ZeroTier 网络") }
+                            webPage = HostWebPage(url: url, device: service.device, directHost: host)
+                        } catch { service.error = error.localizedDescription }
+                    }
+                }
+                Button("在浏览器打开原链接") { systemOpenURL(url); webURL = nil }
+            }
+        }
+        .sheet(item: $webPage) { page in HostWebPageView(page: page) }
     }
 }
 

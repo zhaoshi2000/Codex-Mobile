@@ -1,4 +1,6 @@
 import { CodexRPC } from "./rpc.mjs";
+import { NetworkTunnels } from "./network-tunnels.mjs";
+import { DirectFiles } from "./direct-files.mjs";
 import { quotaSummary } from "./quota.mjs";
 import { localLinkPath, matchesLinkedFile } from "./download-access.mjs";
 import { questionGroups, questionAnswer } from "./questions.mjs";
@@ -23,6 +25,7 @@ export class Gateway {
     desktopCatalog = false,
   }) {
     this.rpc = rpc;
+    this.networkTunnels = new NetworkTunnels();
     this.ipc = ipc;
     this.rootPaths = roots;
     this.stateDir = stateDir;
@@ -30,6 +33,7 @@ export class Gateway {
     this.queued = new Map();
     this.thumbnails = new Map();
     this.leases = new Map();
+    this.directFiles = new DirectFiles(this.leases, () => this.networkTunnels.addresses());
     this.uploads = new Uploads(stateDir);
     this.monitors = new Map();
     this.pendingQueued = new Map();
@@ -289,7 +293,7 @@ export class Gateway {
       this.fileQueue = run.catch(() => {});
       return run;
     }
-    if (["send", "steerQueued", "removeQueued", "answer", "createThread", "deleteThread", "renameThread", "forkThread", "setModel", "pinThread", "markRead"].includes(method)) {
+    if (["send", "steerQueued", "removeQueued", "answer", "answerStatus", "createThread", "deleteThread", "renameThread", "forkThread", "setModel", "pinThread", "markRead"].includes(method)) {
       const run = (this.sendQueue || Promise.resolve()).then(() =>
         this.dispatch(method, p, peer),
       );
@@ -300,6 +304,11 @@ export class Gateway {
   }
   async dispatch(method, p, peer) {
     switch (method) {
+      case "networkInfo": return { zeroTierAddresses: this.networkTunnels.addresses() };
+      case "networkOpen": return this.networkTunnels.open(peer.publicKey, p.host, p.port);
+      case "networkRead": return this.networkTunnels.read(peer.publicKey, p.id);
+      case "networkWrite": return this.networkTunnels.write(peer.publicKey, p.id, p.data);
+      case "networkClose": this.networkTunnels.session(peer.publicKey, p.id); this.networkTunnels.drop(p.id); return {};
       case "transcribe": {
         if (!this.transcribe) throw Error("请更新电脑连接程序以启用语音输入");
         return this.transcribe(p);
@@ -439,6 +448,13 @@ export class Gateway {
         child.on("error", () => {});
         child.unref();
         return { message: "已请求电脑打开对话，请稍后重新连接" };
+      }
+      case "answerStatus": {
+        await this.authorizeThread(p.threadId);
+        const record = this.ledger[p.messageId];
+        if (!record) return { state: "notSubmitted" };
+        if (record.owner !== peer.publicKey || record.threadId !== p.threadId || record.groupId !== p.groupId) throw Error("无权查询此回答");
+        return { state: record.state };
       }
       case "answer": {
         await this.authorizeThread(p.threadId);
@@ -632,8 +648,14 @@ export class Gateway {
           expires: Date.now() + 10 * 60 * 1000,
         };
         this.leases.set(id, lease);
+        let direct;
+        if (p.direct === true) {
+          try { direct = await this.directFiles.link(lease); }
+          catch (e) { this.leases.delete(id); await fs.rm(folder, {recursive:true,force:true}); throw e; }
+        }
         return {
           id,
+          direct,
           size: lease.size,
           name: lease.name,
           sha256: lease.sha256,
@@ -877,6 +899,8 @@ export class Gateway {
       }
   }
   async close() {
+    this.networkTunnels.close();
+    await this.directFiles.close();
     this.activity?.close();
     clearInterval(this.leaseTimer);
     await this.uploads.close();
