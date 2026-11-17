@@ -42,15 +42,14 @@ try {
         & robocopy.exe $sourceRoot $InstallRoot /E /COPY:DAT /DCOPY:DAT /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "复制程序文件失败（robocopy 退出码 $LASTEXITCODE）。" }
 
-        # The extracted private token is no longer needed after it reaches the installed app.
-        # bootstrap.ps1 imports the installed copy into the current user's protected state.
+        # Preserve the extracted package so it can install another Windows PC.
+        # bootstrap.ps1 imports and removes only the installed copy of the token.
         $sourceToken = Join-Path $sourceRoot 'setup\relay.token'
         $installedToken = Join-Path $InstallRoot 'setup\relay.token'
         if ((Test-Path -LiteralPath $sourceToken) -and (Test-Path -LiteralPath $installedToken)) {
             $sourceHash = (Get-FileHash -LiteralPath $sourceToken -Algorithm SHA256).Hash
             $installedHash = (Get-FileHash -LiteralPath $installedToken -Algorithm SHA256).Hash
             if ($sourceHash -ne $installedHash) { throw '安装后的连接凭据校验失败。' }
-            Remove-Item -LiteralPath $sourceToken -Force
         }
     }
 

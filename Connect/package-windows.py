@@ -8,7 +8,7 @@ import zipfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--runtime', required=True, type=Path, help='Directory containing node.exe and LICENSE')
-parser.add_argument('--version', default='0.4.33')
+parser.add_argument('--version', default='0.4.34')
 parser.add_argument('--setup-token-file', type=Path,
                     help='Private 32+ character relay connection token. Never commit this file.')
 args = parser.parse_args()
@@ -68,7 +68,7 @@ with tempfile.TemporaryDirectory(prefix='astrogate-package-') as temp:
         setup_dir = stage / 'setup'
         setup_dir.mkdir()
         (setup_dir / 'relay.token').write_text(setup_token, encoding='utf-8')
-    setup_note = ('此私人安装包包含专用中转密钥，首次运行自动导入。请勿公开分享 ZIP。'
+    setup_note = ('此私人安装包包含专用中转密钥，首次运行自动导入。解压目录保留密钥以便安装其他电脑；使用后请删除解压目录，不要公开分享 ZIP。'
                   if setup_token else '此公开安装包不含连接密钥，首次运行需从中转后台取得专用密钥。')
     (stage / '使用说明.txt').write_text(f'''AstroGate Connect Windows x64
 
