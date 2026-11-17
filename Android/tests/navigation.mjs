@@ -12,7 +12,7 @@ window.Native={call(id,op,json){let p=JSON.parse(json),r={};if(op==='boot')r=fix
 window.calls??=[];window.calls.push({op,p});
 if(op==='questionSubmit')r={state:'accepted',answers:p.answers};
 if(op==='zeroTierState')r={enabled:false,status:'已关闭',nodeID:'abc1234567'};
-if(op==='rpc'){switch(p.method){case 'quota':r={available:true,windows:[{id:'codex:primary',label:'周额度',remainingPercent:11,resetsAt:2000000000}]};break;case 'threads':r={threads:[{id:'chat-'+window.pc,title:'测试对话 '+window.pc}]};break;case 'navigation':r={projects:[{id:'p1',name:'项目一'}],unread:[]};break;case 'activity':r={tasks:[]};break;case 'watch':r={writable:true};break;case 'history':r={messages:[{id:'m1',role:'assistant',text:'测试回复',turnId:'turn1'}]};break;case 'models':r={models:[{id:'test',name:'Test',efforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],defaultEffort:'low'},{id:'other',name:'Other',efforts:[{reasoningEffort:'medium'}],defaultEffort:'medium'}],current:{model:'test',reasoningEffort:'high'}};break;case 'queued':r={messages:[]};break;}}
+if(op==='rpc'){switch(p.method){case 'quota':r=window.pc==='pc-b'?{available:false,windows:[]}:{available:true,windows:[{id:'codex:primary',label:'周额度',remainingPercent:11,resetsAt:2000000000}]};break;case 'threads':r={threads:[{id:'chat-'+window.pc,title:'测试对话 '+window.pc}]};break;case 'navigation':r={projects:[{id:'p1',name:'项目一'}],unread:[]};break;case 'activity':r={tasks:[]};break;case 'watch':r={writable:true};break;case 'history':r={messages:[{id:'m1',role:'assistant',text:'测试回复',turnId:'turn1'}]};break;case 'models':r={models:[{id:'test',name:'Test',efforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],defaultEffort:'low'},{id:'other',name:'Other',efforts:[{reasoningEffort:'medium'}],defaultEffort:'medium'}],current:{model:'test',reasoningEffort:'high'}};break;case 'queued':r={messages:[]};break;}}
 if(op==='openclaw'){queueMicrotask(()=>nativeReply({id,error:'Gateway connection refused'}));return;}
 if(op==='connect')window.pc=p.id;
 if(op==='pair'){fixture.devices.push({hostId:'pc-c',name:'电脑 C'});r=fixture;}
@@ -60,10 +60,14 @@ try{
  await check('Code copy excludes prose and button label',`window.calls.findLast(c=>c.op==='copy').p.text.trim()==='printf hello'`);
  await run(`renderChat()`);
 
- await check('Codex quota summary shows remaining percentage',`document.querySelector('[data-quotabox]').textContent.includes('剩余 11%')`);
+ await check('Chat hides connection status and quota but retains model selector',`document.querySelector('#status span')===null&&document.querySelector('[data-quotabox]')===null&&document.querySelector('[data-action=models]')!==null`);
+ await click('[data-tab=connect]');
+ await check('Official quota appears only beside its own device',`document.querySelector('[data-device-quota=pc-a]').textContent.includes('剩余 11%')&&document.querySelector('[data-device-quota=pc-b]').textContent===''`);
+ await fs.writeFile('Build/quota-devices-021.png',Buffer.from((await cmd('Page.captureScreenshot',{format:'png'})).data,'base64'));
  await click('[data-action=quota]');
  await check('Quota details include reset time',`document.querySelector('#modal').textContent.includes('重置时间')`);
  await click('[data-modal="0"]');
+ await click('[data-tab=codex]');
  await run(`s.draft='未发送的草稿';renderComposer()`);
  await click('[data-tab=connect]');await click('[data-tab=codex]');
  await check('Switching tabs preserves conversation and draft',`s.route==='chat'&&s.thread.id==='chat-pc-a'&&document.querySelector('#draft').value==='未发送的草稿'`);
@@ -73,6 +77,8 @@ try{
  await check('Selecting same connected device resumes chat',`s.route==='chat'&&s.thread.id==='chat-pc-a'`);
  await click('[data-tab=connect]');await click('[data-action=connect][data-id=pc-b]');
  await check('Switching computers clears previous conversation state',`s.tab==='codex'&&s.device.hostId==='pc-b'&&s.thread===null&&s.messages.length===0&&s.draft===''&&s.threads[0].id==='chat-pc-b'`);
+ await click('[data-tab=connect]');
+ await check('API account has no quota and does not borrow another device balance',`document.querySelector('[data-device-quota=pc-b]').textContent===''&&document.querySelector('[data-device-quota=pc-a]').textContent.includes('剩余 11%')`);
  await click('[data-tab=services]');
  await check('Services contains file manager and server entries',`document.querySelector('[data-action=localFiles]')!==null&&document.querySelectorAll('[data-action=server]').length===3&&!document.querySelector('[data-action=pair]')`);
  await fs.writeFile('Build/navigation-services.png',Buffer.from((await cmd('Page.captureScreenshot',{format:'png'})).data,'base64'));

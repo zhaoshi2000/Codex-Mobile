@@ -145,11 +145,12 @@ function resetCodex() {
   openDetails.clear();
   detailsCache.clear();
 }
+const deviceQuotas = /* @__PURE__ */ new Map();
 function renderDevices() {
   header("连接", null, btn("pair", "plus", "新建 Codex 连接"));
   showPage(`<h1>连接电脑上的 Codex</h1><p class="hint">扫码绑定，继续电脑上的 Codex 对话。</p>${s.boot.devices.length ? `<div class="section">已绑定设备</div><div class="card list">${s.boot.devices.map((d) => {
     var _a;
-    return `<div class="item"><button class="grow row" data-action="connect" data-id="${E(d.hostId)}">${icon("connect")}<span class="grow name">${E(deviceName(d))}<small>${((_a = s.device) == null ? void 0 : _a.hostId) === d.hostId && s.connected ? "已连接" : "点击连接"}</small></span></button>${btn("deviceMenu", "more", "设备选项", `data-id="${E(d.hostId)}"`)}</div>`;
+    return `<div class="item"><button class="grow row" data-action="connect" data-id="${E(d.hostId)}">${icon("connect")}<span class="grow name">${E(deviceName(d))}<small>${((_a = s.device) == null ? void 0 : _a.hostId) === d.hostId && s.connected ? "已连接" : "点击连接"}</small></span></button><span data-device-quota="${E(d.hostId)}">${deviceQuotaHTML(d.hostId)}</span>${btn("deviceMenu", "more", "设备选项", `data-id="${E(d.hostId)}"`)}</div>`;
   }).join("")}</div>` : empty("添加第一台电脑", "在电脑运行 AstroGate Connect，用手机扫描配对二维码。", `<button class="primary" data-action="pair">${icon("scan")} 扫码绑定</button>`)}<div class="card"><strong>原对话，接着聊</strong><p class="hint">消息和文件保留在电脑；跨网络通过服务器转发加密数据。电脑需要保持开机并运行连接程序。</p></div>`);
 }
 async function pair(uri) {
@@ -222,7 +223,7 @@ function renderThreads() {
   if (s.tab !== "codex" || s.route !== "threads") return;
   tabs();
   header(s.navProject ? ((_a = s.projects.find((p) => p.id === s.navProject)) == null ? void 0 : _a.name) || "项目" : deviceName(s.device || {}), btn("devices", "back", "返回设备列表"), btn("newThread", "edit", "新建对话"));
-  showPage(`<div class="card row"><i class="dot green"></i><div>已连接 ${E(deviceName(s.device || {}))}<p class="hint">电脑本机记录 · 加密连接</p></div></div><div data-quotabox>${quotaHTML()}</div>${!s.navProject ? projectBlock() : ""}<div class="section">${s.navProject ? "项目对话" : "最近对话"}</div><div class="card list">${threadRows(s.threads)}</div>${s.threadCursor ? '<button data-action="moreThreads">查看更多</button>' : ""}${!s.threads.length ? empty("还没有对话", "点击右上角新建对话") : ""}`);
+  showPage(`<div class="card row"><i class="dot green"></i><div>已连接 ${E(deviceName(s.device || {}))}<p class="hint">电脑本机记录 · 加密连接</p></div></div>${!s.navProject ? projectBlock() : ""}<div class="section">${s.navProject ? "项目对话" : "最近对话"}</div><div class="card list">${threadRows(s.threads)}</div>${s.threadCursor ? '<button data-action="moreThreads">查看更多</button>' : ""}${!s.threads.length ? empty("还没有对话", "点击右上角新建对话") : ""}`);
 }
 function drawer() {
   const el = $("#drawer");
@@ -281,41 +282,48 @@ async function openThread(id) {
     }
   }
 }
-function quotaHTML() {
-  var _a, _b;
-  const q = (_b = (_a = s.quota) == null ? void 0 : _a.windows) == null ? void 0 : _b[0];
-  return `<button data-action="quota" style="font-size:12px" ${!s.connected ? "disabled" : ""}>${q ? E(q.label) + "剩余 " + Math.round(q.remainingPercent) + "%" : "Codex 剩余额度"} ›</button>`;
+function deviceQuotaHTML(id) {
+  var _a, _b, _c;
+  const data = id === ((_a = s.device) == null ? void 0 : _a.hostId) ? s.quota : (_b = deviceQuotas.get(id)) == null ? void 0 : _b.data;
+  const q = (data == null ? void 0 : data.available) !== false && ((_c = data == null ? void 0 : data.windows) == null ? void 0 : _c[0]);
+  if (!q) return "";
+  return `<button class="devicequota" data-action="quota" data-id="${E(id)}"><small>${E(q.label)}</small><span>剩余 ${Math.round(q.remainingPercent)}%</span></button>`;
+}
+function renderDeviceQuotas() {
+  document.querySelectorAll("[data-device-quota]").forEach((el) => el.innerHTML = deviceQuotaHTML(el.dataset.deviceQuota));
 }
 async function refreshQuota(force = false) {
   var _a, _b, _c;
-  if (!s.connected || s.quotaLoading || !force && Date.now() - (s.quotaAt || 0) < 6e4) return;
-  s.quotaLoading = true;
   const id = (_a = s.device) == null ? void 0 : _a.hostId;
+  if (!s.connected || !id || s.quotaLoading === id || !force && Date.now() - (s.quotaAt || 0) < 6e4) return;
+  s.quotaLoading = id;
   try {
     const q = await rpc("quota");
-    if (((_b = s.device) == null ? void 0 : _b.hostId) === id) {
+    if (((_b = s.device) == null ? void 0 : _b.hostId) === id && s.connected) {
       s.quota = q;
       s.quotaAt = Date.now();
+      deviceQuotas.set(id, { data: q, at: s.quotaAt });
     }
   } catch {
     if (((_c = s.device) == null ? void 0 : _c.hostId) === id) {
-      s.quota = { windows: [], message: "无法读取 Codex 额度，请更新电脑连接程序后重试。" };
+      s.quota = { available: false, windows: [], message: "无法读取 Codex 额度，请更新电脑连接程序后重试。" };
       s.quotaAt = Date.now();
+      deviceQuotas.delete(id);
     }
   } finally {
-    s.quotaLoading = false;
-    document.querySelectorAll("[data-quotabox]").forEach((el) => el.innerHTML = quotaHTML());
+    if (s.quotaLoading === id) s.quotaLoading = false;
+    renderDeviceQuotas();
   }
 }
-async function showQuota() {
-  await refreshQuota(true);
-  const q = s.quota || {};
-  await modal("Codex 剩余额度", (q.windows || []).map((w) => `<div class="card"><strong>${E(w.label)} · 剩余 ${Math.round(w.remainingPercent)}%</strong><progress value="${w.remainingPercent}" max="100"></progress>${w.resetsAt ? '<p class="hint">重置时间：' + E(new Date(w.resetsAt * 1e3).toLocaleString()) + "</p>" : ""}</div>`).join("") || `<p>${E(q.message || "暂无额度数据")}</p>`, [["完成", false]]);
+async function showQuota(id = ((_a) => (_a = s.device) == null ? void 0 : _a.hostId)()) {
+  var _a2, _b, _c;
+  if (id === ((_a2 = s.device) == null ? void 0 : _a2.hostId)) await refreshQuota(true);
+  const record = deviceQuotas.get(id), q = (id === ((_b = s.device) == null ? void 0 : _b.hostId) ? s.quota : record == null ? void 0 : record.data) || {}, device = s.boot.devices.find((d) => d.hostId === id);
+  await modal(deviceName(device || {}) + " · Codex 额度", ((q.windows || []).map((w) => `<div class="card"><strong>${E(w.label)} · 剩余 ${Math.round(w.remainingPercent)}%</strong><progress value="${w.remainingPercent}" max="100"></progress>${w.resetsAt ? '<p class="hint">重置时间：' + E(new Date(w.resetsAt * 1e3).toLocaleString()) + "</p>" : ""}</div>`).join("") || `<p>${E(q.message || "暂无额度数据")}</p>`) + ((record == null ? void 0 : record.at) ? `<p class="hint">查询时间：${E(new Date(record.at).toLocaleString())}${id !== ((_c = s.device) == null ? void 0 : _c.hostId) ? "；连接此设备可刷新" : ""}</p>` : ""), [["完成", false]]);
 }
 function renderStatus() {
-  var _a;
   const el = $("#status");
-  if (el) el.innerHTML = `<span class="ellipsis">${E(!s.connected ? "连接已断开" : s.busy ? ((_a = s.progress) == null ? void 0 : _a.label) || "正在处理…" : s.status || "已连接桌面原会话")}</span><button data-action="models">${E(s.model || "选择模型")} ⌄</button>`;
+  if (el) el.innerHTML = `<button data-action="models">${E(s.model || "选择模型")} ⌄</button>`;
 }
 marked.use({ renderer: { link(token) {
   const local = Core.localLink(token.href);
@@ -373,7 +381,7 @@ function renderChat(bottom = false) {
   let previous = page.scrollTop, atBottom = page.scrollHeight - page.clientHeight - page.scrollTop < 120;
   const wasChat = page.classList.contains("chatpage");
   page.className = "chatpage";
-  page.innerHTML = `<div class="chatstatus" id="status"></div><div data-quotabox>${quotaHTML()}</div>${s.cursor ? '<button data-action="older">加载更早的消息</button>' : ""}<div class="messages">${messagesHTML()}</div><div id="questions"></div><div class="progressline">${s.busy ? '<i class="spinner"></i>' + E(((_b = s.progress) == null ? void 0 : _b.label) || "正在处理…") : s.messages.length ? "Codex 处理完成" : ""}</div>`;
+  page.innerHTML = `<div class="chatstatus" id="status"></div>${s.cursor ? '<button data-action="older">加载更早的消息</button>' : ""}<div class="messages">${messagesHTML()}</div><div id="questions"></div><div class="progressline">${s.busy ? '<i class="spinner"></i>' + E(((_b = s.progress) == null ? void 0 : _b.label) || "正在处理…") : s.messages.length ? "Codex 处理完成" : ""}</div>`;
   renderStatus();
   renderQuestions();
   renderComposer();
@@ -656,7 +664,7 @@ function renderRemoteFiles() {
 function renderSettings() {
   const a = s.boot.ai || {};
   header("设置");
-  showPage(`<div class="section">AI 中转站</div><div class="card">${field("address", "API 地址", a.address || "", "url")}${field("apiKey", a.hasKey ? "API Key（已保存，留空保留）" : "API Key", "", "password")}<label>模型</label><select name="model" id="aiModel">${a.model ? `<option>${E(a.model)}</option>` : '<option value="">获取模型后选择</option>'}</select><div class="row"><button data-action="fetchModels">获取模型</button><button class="primary" data-action="saveAI">保存</button></div><p class="hint" id="modelStatus">填写地址和 API Key 后自动获取可选模型。凭据由 Android 系统密钥加密保存。</p></div><div class="card list"><button class="item" data-action="enableNotifications">${icon("check")}开启任务完成提醒</button><button class="item" data-action="projectSite">${icon("codex")}源码与使用说明</button></div><p class="hint">AstroGate 管家 · Android 0.2.0<br>支持 Android 10 及以上。保持电脑连接程序运行，后台恢复时会重新同步会话。</p>`);
+  showPage(`<div class="section">AI 中转站</div><div class="card">${field("address", "API 地址", a.address || "", "url")}${field("apiKey", a.hasKey ? "API Key（已保存，留空保留）" : "API Key", "", "password")}<label>模型</label><select name="model" id="aiModel">${a.model ? `<option>${E(a.model)}</option>` : '<option value="">获取模型后选择</option>'}</select><div class="row"><button data-action="fetchModels">获取模型</button><button class="primary" data-action="saveAI">保存</button></div><p class="hint" id="modelStatus">填写地址和 API Key 后自动获取可选模型。凭据由 Android 系统密钥加密保存。</p></div><div class="card list"><button class="item" data-action="enableNotifications">${icon("check")}开启任务完成提醒</button><button class="item" data-action="projectSite">${icon("codex")}源码与使用说明</button></div><p class="hint">AstroGate 管家 · Android 0.2.1<br>支持 Android 10 及以上。保持电脑连接程序运行，后台恢复时会重新同步会话。</p>`);
   for (const input of document.querySelectorAll("#page input")) input.addEventListener("input", () => {
     clearTimeout(renderSettings.timer);
     const values = aiFields();
@@ -990,6 +998,7 @@ async function action(a, b) {
         if (v.__choice === "delete") {
           if (await confirm("删除设备", "移除此手机保存的配对？")) {
             s.boot = await call("remove", { kind: "devices", id });
+            deviceQuotas.delete(id);
             if (((_d = s.device) == null ? void 0 : _d.hostId) === id) {
               clearTimeout(reconnectTimer);
               resetCodex();
@@ -1077,7 +1086,7 @@ async function action(a, b) {
       await rpc("stop", { threadId: s.thread.id, turnId: s.turnId });
       break;
     case "quota":
-      await showQuota();
+      await showQuota(b.dataset.id);
       break;
     case "models":
       await modelPicker();
@@ -1363,6 +1372,7 @@ setInterval(() => {
     safe(refreshQuota);
   }
   if (s.connected && s.route === "threads") safe(loadThreads);
+  if (s.connected && s.tab === "connect") safe(refreshQuota);
   if (s.tab === "services" && s.route === "claw" && s.clawSession && !((_a = document.activeElement) == null ? void 0 : _a.matches("textarea"))) safe(clawHistory);
 }, 12e3);
 safe(boot);

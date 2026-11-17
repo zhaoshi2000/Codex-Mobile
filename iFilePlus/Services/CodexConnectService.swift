@@ -91,7 +91,7 @@ extension Data {
         quotaLoading = true; defer { quotaLoading = false }
         do {
             let data = try await request("quota")
-            quota = (data["windows"] as? [[String: Any]] ?? []).compactMap { row in
+            quota = (data["available"] as? Bool == false ? [] : data["windows"] as? [[String: Any]] ?? []).compactMap { row in
                 guard let id = row["id"] as? String, let label = row["label"] as? String, let remaining = row["remainingPercent"] as? Double else { return nil }
                 return CodexQuotaWindow(id: id, label: label, remaining: remaining, resetsAt: (row["resetsAt"] as? Double).map { Date(timeIntervalSince1970: $0) })
             }

@@ -74,16 +74,28 @@ private struct CodexDeviceConnectionRow: View {
         _service = ObservedObject(wrappedValue: CodexConnectService.session(for: device))
     }
     var body: some View {
-        Button(action: open) {
-            HStack(spacing: 12) {
+        HStack(spacing: 12) {
+            Button(action: open) {
+              HStack(spacing: 12) {
                 Image(systemName: "desktopcomputer").foregroundStyle(.blue)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.displayName).foregroundStyle(.primary)
                     Text(service.connected ? "已连接 · 点击继续对话" : "点击连接 Codex").font(.caption).foregroundStyle(.secondary)
                 }
-                Spacer()
+                Spacer(minLength: 4)
                 if service.connected { Circle().fill(.green).frame(width: 8, height: 8).accessibilityLabel("已连接") }
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+              }.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            CodexQuotaButton(service: service, compact: true)
+        }
+        .task(id: service.connected) {
+            guard service.connected else { return }
+            await service.refreshQuota(force: true)
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                await service.refreshQuota()
             }
         }
     }
@@ -157,7 +169,6 @@ private struct CodexHostView: View {
             Section {
                 Label(service.status, systemImage: service.connected ? "checkmark.circle.fill" : "wifi.slash").foregroundStyle(service.connected ? .green : .secondary)
                 Text("电脑本机记录 · 服务器仅转发").font(.caption).foregroundStyle(.secondary)
-                CodexQuotaButton(service: service)
                 if let error = service.error { Text(error).font(.footnote).foregroundStyle(.red) }
                 if !service.connected { Button("重新连接") { Task { await load() } }.disabled(loading) }
             }
@@ -393,14 +404,12 @@ private struct CodexChatContent: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(service.running ? (service.progressLabel.isEmpty ? "Codex 正在处理…" : service.progressLabel) : service.status).font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button { modelsOpen = true } label: {
                         HStack(spacing: 3) { Text(service.models.first(where: { $0.id == service.currentModel })?.title ?? (service.currentModel.isEmpty ? "模型" : service.currentModel)).lineLimit(1); Image(systemName: "chevron.down") }.font(.caption)
                     }.disabled(!service.writable)
                 }
                 if service.approvalNeeded { Label("有操作等待确认，请在电脑处理后继续。", systemImage: "hand.raised").font(.footnote).foregroundStyle(.orange) }
-                CodexQuotaButton(service: service)
                 if let error = service.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
                 if let failure = service.taskFailure { Text(failure).font(.caption).foregroundStyle(.red).lineLimit(4).textSelection(.enabled) }
                 if !service.writable {

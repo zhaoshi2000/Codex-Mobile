@@ -2,20 +2,30 @@ import SwiftUI
 
 struct CodexQuotaButton: View {
     @ObservedObject var service: CodexConnectService
+    var compact = false
     @State private var showing = false
     var body: some View {
-        Button {
+        if service.connected, let first = service.quota.first {
+          Button {
             showing = true
             Task { await service.refreshQuota(force: true) }
         } label: {
-            HStack(spacing: 4) {
+            if compact {
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(first.label).lineLimit(1)
+                    Text("剩余 \(first.remaining, specifier: "%.0f")%").monospacedDigit()
+                }.font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: 110, alignment: .trailing)
+                    .accessibilityLabel("Codex \(first.label)剩余 \(Int(first.remaining))%，查看额度详情")
+            } else { HStack(spacing: 4) {
                 Image(systemName: "gauge.with.dots.needle.33percent")
                 if let first = service.quota.first {
                     Text("\(first.label)剩余 \(first.remaining, specifier: "%.0f")%")
                 } else { Text(service.quotaLoading ? "正在读取 Codex 额度…" : "Codex 额度") }
                 Image(systemName: "chevron.right")
-            }.font(.caption)
+            }.font(.caption) }
         }
+        .buttonStyle(.plain)
         .disabled(!service.connected)
         .task { await service.refreshQuota() }
         .onChange(of: service.connected) { _, connected in if connected { Task { await service.refreshQuota(force: true) } } }
@@ -38,6 +48,7 @@ struct CodexQuotaButton: View {
                 }.navigationTitle("Codex 剩余额度").navigationBarTitleDisplayMode(.inline)
                     .toolbar { Button("完成") { showing = false } }
             }
+        }
         }
     }
 }
