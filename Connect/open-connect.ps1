@@ -1,4 +1,4 @@
-param([switch]$Configure)
+﻿param([switch]$Configure)
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'find-codex.ps1')
@@ -66,7 +66,7 @@ try {
 } catch {
     $message = "连接程序启动失败。请确认 Codex 桌面版已打开并完成登录。`n`n" + $_.Exception.Message
     [void][Windows.Forms.MessageBox]::Show($message, 'AstroGate Connect')
-    exit 1
+    exit 2
 } finally {
     if ($locked) { $mutex.ReleaseMutex() }
     $mutex.Dispose()

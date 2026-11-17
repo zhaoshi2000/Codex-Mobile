@@ -45,7 +45,7 @@ if (Test-Path -LiteralPath $pidFile) {
 }
 Repair-CodexExecutable -ConfigPath $configPath
 $credentialFile = Join-Path $statePath 'relay.token'
-$env:IFILE_RELAY_TOKEN = (Get-Content -LiteralPath $credentialFile -Raw).Trim()
+$env:IFILE_RELAY_TOKEN = (Get-Content -LiteralPath $credentialFile -Raw -Encoding UTF8).Trim()
 try {
     $ready = $false
     $process = Start-Process -FilePath $nodePath -ArgumentList @(('"' + $bridgeFile + '"'), ('"' + $configPath + '"')) -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $statePath 'bridge.log') -RedirectStandardError (Join-Path $statePath 'bridge-error.log') -PassThru

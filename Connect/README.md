@@ -1,4 +1,4 @@
-# AstroGate Connect — 0.4.31
+# AstroGate Connect — 0.4.32
 
 手机在 AstroGate 管家的 Codex 页选择电脑 → 项目 → 原对话。执行仍由该电脑的 Codex 桌面版负责，使用电脑现有登录和会话设置。无需把 OpenAI 密钥传给手机或中转。
 
@@ -52,7 +52,7 @@
 
 另一台 Windows x64 电脑可以使用同一安装包、同一中转服务；每台电脑独立生成身份和二维码。不需要额外安装 Node.js/Python，不需要复制原电脑源码或状态目录。电脑需要保持开机联网并运行已登录的 Codex 桌面版。Windows ARM64 尚未验证。
 
-Windows 安装包内置官方 Node x64 运行时和依赖，能识别商店版及常见独立版 Codex。Codex 更新后如原路径失效，会重新查找可执行文件，保留电脑身份与配对。二维码仅保存在用户状态目录。构建公开包：`python Connect/package-windows.py --runtime <含 node.exe 和 LICENSE 的目录> --version 0.4.31`；私有免配置包另外传入 `--setup-token-file Build/Private/setup/relay.token`。私有包只存放在本地 `Build/Releases`，不得上传公开仓库或分享；公开包没有连接密钥。
+Windows 安装包内置官方 Node x64 运行时和依赖，能识别商店版及常见独立版 Codex。Codex 更新后如原路径失效，会重新查找可执行文件，保留电脑身份与配对。二维码仅保存在用户状态目录。构建公开包：`python Connect/package-windows.py --runtime <含 node.exe 和 LICENSE 的目录> --version 0.4.32`；私有免配置包另外传入 `--setup-token-file Build/Private/setup/relay.token`。私有包只存放在本地 `Build/Releases`，不得上传公开仓库或分享；公开包没有连接密钥。
 
 Windows x64 ZIP 完整解压后，双击 `安装 AstroGate Connect.cmd`。它安装到当前用户 `%LOCALAPPDATA%\Programs\AstroGate Connect`，创建桌面和开始菜单快捷方式，然后启动配对窗口；后续双击 `AstroGate Connect` 快捷方式即可刷新二维码。默认中转地址为 `wss://1.14.93.149/ifile-connect`。私有包首次启动自动导入随包提供的专用连接密钥，用户不必输入服务器地址或密钥；公开包首次需从中转后台取得专用连接密钥。密钥和配对状态保存在当前 Windows 用户目录 `~/.ifileplus-connect`，安装更新不会覆盖。不要把一台电脑的状态目录复制到另一台。
 
@@ -68,6 +68,8 @@ Windows x64 ZIP 完整解压后，双击 `安装 AstroGate Connect.cmd`。它安
 6. 用 iFile+ → Codex → + 扫描程序提示位置的 `pairing.png`；两分钟内有效且只能用于一部新手机。过期不撤销已配对身份，也不会断开已建立的连接。
 
 Windows 使用 `start.ps1 -Config 完整配置路径` 启动并显示桌面二维码、倒计时和连接设备数量。程序已运行时只刷新配对码，保持原连接；`-Restart` 用于更新代码后显式重启，`stop.ps1` 停止。启动脚本从配置的 stateDir 内 `relay.token` 读取中转密钥；该目录应只允许当前 Windows 用户访问。安装依赖和配置凭据需先完成。关闭二维码窗口不会停止连接。运行 `install-autostart.ps1` 可安装当前用户的 Windows 登录自启，后台 watchdog 每 30 秒检查一次连接进程，并在 Codex 未运行时启动桌面应用。`start.ps1 -EnsureRunning -NoShowQR` 只检查和启动，不刷新已有二维码。不会自动登录 Windows 或修改休眠设置。
+
+0.4.32 修复简体中文 Windows PowerShell 5.1 将无 BOM 的启动脚本误读为 ANSI 后出现的语法错误；更新包重新运行安装入口即可覆盖程序，保留当前用户的连接与配对状态。
 
 0.4.31 安装到固定用户目录，连接成功启动后自动设置当前用户登录自启；自启不依赖解压目录。重启并登录 Windows 后联网即可恢复连接，原配对保留。未登录 Windows、关机或休眠期间无法连接。更新时再次运行新版本安装器。
 

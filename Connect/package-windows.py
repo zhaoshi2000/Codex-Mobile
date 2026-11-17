@@ -8,7 +8,7 @@ import zipfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--runtime', required=True, type=Path, help='Directory containing node.exe and LICENSE')
-parser.add_argument('--version', default='0.4.31')
+parser.add_argument('--version', default='0.4.32')
 parser.add_argument('--setup-token-file', type=Path,
                     help='Private 32+ character relay connection token. Never commit this file.')
 args = parser.parse_args()
@@ -25,6 +25,29 @@ if args.setup_token_file:
     if not 32 <= len(setup_token) <= 512 or any(char.isspace() for char in setup_token):
         parser.error('Setup token must be 32–512 characters with no whitespace')
 source = Path(__file__).resolve().parent
+power_shell_scripts = [
+    'open-connect.ps1', 'bootstrap.ps1', 'find-codex.ps1',
+    'start.ps1', 'stop.ps1', 'show-pairing.ps1',
+    'install-app.ps1', 'install-autostart.ps1', 'watchdog.ps1',
+]
+
+def check_powershell_encoding(name, content):
+    """PowerShell 5.1 reads BOM-less scripts with the machine's ANSI code page."""
+    if content.startswith(b'\xef\xbb\xbf'):
+        try:
+            content.decode('utf-8-sig')
+        except UnicodeDecodeError:
+            parser.error(f'{name} has invalid UTF-8 after its BOM')
+    elif any(byte > 127 for byte in content):
+        parser.error(f'{name} contains non-ASCII text without a UTF-8 BOM; '
+                     'Windows PowerShell 5.1 may misread Chinese and break syntax')
+
+for name in power_shell_scripts:
+    script = source / name
+    if not script.is_file():
+        parser.error(f'Missing {name}')
+    check_powershell_encoding(name, script.read_bytes())
+
 output_dir = source.parent / 'Build' / 'Releases'
 output_dir.mkdir(parents=True, exist_ok=True)
 kind = '-Private' if setup_token else ''
@@ -34,9 +57,8 @@ with tempfile.TemporaryDirectory(prefix='astrogate-package-') as temp:
     stage.mkdir()
     for name in ['src', 'node_modules']:
         shutil.copytree(source / name, stage / name)
-    for name in ['安装 AstroGate Connect.cmd', 'install-app.ps1', 'AstroGate.ico',
-                 'Open AstroGate Connect.cmd', 'open-connect.ps1', 'bootstrap.ps1', 'find-codex.ps1',
-                 'start.ps1', 'stop.ps1', 'show-pairing.ps1', 'install-autostart.ps1', 'watchdog.ps1', 'README.md',
+    for name in ['安装 AstroGate Connect.cmd', 'AstroGate.ico',
+                 'Open AstroGate Connect.cmd', *power_shell_scripts, 'README.md',
                  'THIRD_PARTY_NOTICES', 'package.json', 'package-lock.json']:
         shutil.copy2(source / name, stage / name)
     (stage / 'Runtime').mkdir()
@@ -82,6 +104,10 @@ with zipfile.ZipFile(output) as archive:
             assert Path(name).name not in {'relay.token', 'bridge.config.json', 'device.json', 'pairing.png', 'pairing.txt'}
     for file in (source / 'src').glob('*.mjs'):
         assert archive.read('AstroGate Connect/src/' + file.name) == file.read_bytes()
+    for name in power_shell_scripts:
+        bundled = archive.read('AstroGate Connect/' + name)
+        assert bundled == (source / name).read_bytes(), name
+        check_powershell_encoding(name, bundled)
 digest = hashlib.sha256(output.read_bytes()).hexdigest()
 output.with_suffix('.zip.sha256').write_text(f'{digest}  {output.name}\n', encoding='ascii')
 print(output)

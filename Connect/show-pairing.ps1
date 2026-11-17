@@ -1,4 +1,4 @@
-param([string]$Config = "$env:USERPROFILE\.ifileplus-connect\bridge.config.json")
+﻿param([string]$Config = "$env:USERPROFILE\.ifileplus-connect\bridge.config.json")
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
