@@ -28,7 +28,7 @@ function New-ConnectionSettings {
         $form.MinimizeBox = $false
         $form.Font = New-Object Drawing.Font('Microsoft YaHei UI', 10)
         $note = New-Object Windows.Forms.Label
-        $note.Text = '请先打开并登录 Codex 桌面版。中转地址和连接密钥由你的中转服务提供。'
+        $note.Text = '请先打开并登录 Codex 桌面版。从中转后台复制 WSS 地址和连接密钥；后台登录凭据不要填在这里。'
         $note.SetBounds(16, 10, 448, 44)
         $relayLabel = New-Object Windows.Forms.Label
         $relayLabel.Text = '中转地址（wss://）'

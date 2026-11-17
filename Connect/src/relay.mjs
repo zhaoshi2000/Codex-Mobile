@@ -1,15 +1,23 @@
 import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { timingSafeEqual } from "node:crypto";
 import { pathToFileURL } from "node:url";
-export function createRelay({ token, port = 8787, host = "127.0.0.1" }) {
+import { createRelayAdmin } from "./relay-admin.mjs";
+export function createRelay({ token, port = 8787, host = "127.0.0.1", adminPassword, configPath, publicWss }) {
   if (!token || token.length < 32)
     throw new Error("IFILE_RELAY_TOKEN 至少需要 32 个字符");
   const hosts = new Map(),
     peers = new Map(),
     rates = new Map();
+  const admin = createRelayAdmin({ legacyToken: token, adminPassword, configPath, publicWss });
   let next = 0;
   const server = http.createServer((req, res) => {
+    if (req.url?.startsWith('/admin')) {
+      admin.handle(req, res, { hosts: hosts.size, phones: peers.size }).catch(() => {
+        if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: '后台暂时不可用' }));
+      });
+      return;
+    }
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "application/json");
     res.writeHead(req.url === "/health" ? 200 : 404);
@@ -52,15 +60,8 @@ export function createRelay({ token, port = 8787, host = "127.0.0.1" }) {
     }
     const [, role, id] = match;
     if (role === "host") {
-      const got = Buffer.from(
-          (req.headers.authorization || "").replace(/^Bearer /, ""),
-        ),
-        expected = Buffer.from(token);
-      if (
-        got.length !== expected.length ||
-        !timingSafeEqual(got, expected) ||
-        hosts.has(id)
-      ) {
+      const got = (req.headers.authorization || "").replace(/^Bearer /, "");
+      if (!admin.allowed(got) || hosts.has(id)) {
         socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
         return;
       }
@@ -127,6 +128,7 @@ export function createRelay({ token, port = 8787, host = "127.0.0.1" }) {
   return {
     server,
     async start() {
+      await admin.init();
       await new Promise((r) => server.listen(port, host, r));
       return server.address().port;
     },
@@ -146,6 +148,9 @@ if (
     token: process.env.IFILE_RELAY_TOKEN,
     port: Number(process.env.PORT || 8787),
     host: process.env.BIND_HOST || "127.0.0.1",
+    adminPassword: process.env.IFILE_RELAY_ADMIN_PASSWORD,
+    configPath: process.env.IFILE_RELAY_CONFIG_PATH,
+    publicWss: process.env.IFILE_RELAY_PUBLIC_WSS,
   });
   await r.start();
   console.log("iFile+ Relay listening");

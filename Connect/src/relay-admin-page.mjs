@@ -1,0 +1,34 @@
+export const adminPage = `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AstroGate 中转管理</title>
+<style>
+:root{color-scheme:light dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#101116;color:#f4f5f8}*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(circle at 82% 0,#1b2944 0,transparent 35%),#101116}
+main{max-width:850px;margin:0 auto;padding:38px 22px 70px}header{display:flex;justify-content:space-between;align-items:start;margin-bottom:36px}h1{font-size:28px;margin:5px 0 4px}h2{font-size:18px;margin:0 0 18px}p{line-height:1.55;color:#a8adbc;margin:0}small{color:#9399a9}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.12em;color:#74a9ff}.pill{border-radius:100px;background:#1e3548;color:#8de8b8;padding:8px 13px;font-size:13px;white-space:nowrap}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.card{background:#1c1d24;border:1px solid #30323c;border-radius:18px;padding:22px;margin-bottom:16px;box-shadow:0 12px 35px #0002}
+.metric{font-size:31px;font-weight:700;margin:10px 0 3px}.row{display:flex;align-items:center;gap:12px}.spread{justify-content:space-between}.url{word-break:break-all;color:#d7e6ff;font-family:ui-monospace,monospace;background:#13151c;border:1px solid #30333f;border-radius:11px;padding:13px;margin:15px 0}
+label{font-size:13px;font-weight:600;color:#bfc4d0;display:block;margin:14px 0 7px}input{width:100%;background:#11131a;border:1px solid #414553;color:#fff;border-radius:10px;padding:12px 13px;font:inherit;min-height:44px}input:focus{outline:2px solid #478dff;border-color:transparent}
+button{font:inherit;border:0;border-radius:10px;padding:11px 16px;min-height:44px;cursor:pointer;font-weight:600}.primary{background:#398bfa;color:white}.quiet{background:#333641;color:#f1f2f6}.danger{background:#44262a;color:#ff9ea8}.compact{padding:7px 12px;min-height:36px;font-size:13px}button:disabled{opacity:.5;cursor:default}
+.key{border-top:1px solid #353740;padding:14px 0}.key:first-child{border:0}.key strong{font-size:15px}.key small{display:block;margin-top:4px}.notice{margin-top:14px;padding:12px;border-radius:10px;background:#253042;color:#d5e7ff}.secret{font-family:ui-monospace,monospace;word-break:break-all;user-select:all;margin:10px 0}.error{color:#ff9ea8}.hidden{display:none}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:13px}
+@media(max-width:600px){main{padding:26px 15px 55px}.grid{grid-template-columns:1fr}.card{padding:18px}h1{font-size:24px}}
+</style></head><body><main>
+<header><div><div class="eyebrow">ASTROGATE · ADMIN</div><h1>中转管理</h1><p>管理电脑连接地址和连接密钥</p></div><div class="pill" id="connection">读取中…</div></header>
+<div class="grid"><div class="card"><small>在线电脑</small><div class="metric" id="hosts">—</div><small>当前已连入中转</small></div><div class="card"><small>在线手机连接</small><div class="metric" id="phones">—</div><small>当前已连入中转</small></div></div>
+<section class="card"><h2>WSS 连接地址</h2><p>电脑首次配置时填写这个地址。修改此处只更新管理信息；域名、证书和反向代理仍由服务器配置。</p><div class="url" id="currentWss">读取中…</div><label for="publicWss">推荐给电脑的连接地址</label><input id="publicWss" type="url" spellcheck="false" autocomplete="off" placeholder="wss://example.com/ifile-connect"><div class="actions"><button class="primary" id="saveWss">保存地址</button><button class="quiet" id="copyWss">复制地址</button></div></section>
+<section class="card"><h2>连接密钥</h2><p>电脑填入 WSS 地址和密钥后即可生成配对二维码。每台电脑可用独立密钥；停用后，现有连接会保持到断线，重新连接时须换成有效密钥。</p><div id="keys"></div><label for="keyName">新增密钥名称</label><input id="keyName" maxlength="50" placeholder="例如：家里的电脑" autocomplete="off"><label for="keyValue">自定义密钥（可选；留空自动生成）</label><input id="keyValue" type="password" autocomplete="off" placeholder="至少 32 个字符"><div class="actions"><button class="primary" id="createKey">生成连接密钥</button></div><div class="notice hidden" id="newKey"><strong>新密钥仅在此时显示，请保存到电脑</strong><div class="secret" id="secret"></div><button class="quiet compact" id="copyKey">复制密钥</button></div></section>
+<p id="message" role="status"></p></main>
+<script>
+const base=location.pathname.endsWith('/')?location.pathname:location.pathname+'/';
+const $=id=>document.getElementById(id);
+const message=(value,error=false)=>{ $('message').textContent=value; $('message').className=error?'error':''; };
+async function api(path,options={}){let response=await fetch(base+'api/'+path,{cache:'no-store',...options,headers:{'X-AstroGate-Admin':'1',...(options.body?{'Content-Type':'application/json'}:{})}});let data=await response.json();if(!response.ok)throw Error(data.error||'请求失败');return data}
+async function load(){try{let state=await api('state');$('connection').textContent='● 服务运行中';$('hosts').textContent=state.hosts;$('phones').textContent=state.phones;$('currentWss').textContent=state.publicWss;$('publicWss').value=state.publicWss;
+  let list=$('keys');list.replaceChildren();let legacy=document.createElement('div');legacy.className='key';let title=document.createElement('strong');title.textContent='原有连接密钥';let hint=document.createElement('small');hint.textContent='继续有效，保留已配置电脑的连接';legacy.append(title,hint);list.append(legacy);
+  for(let key of state.keys){let row=document.createElement('div');row.className='key row spread';let info=document.createElement('div');let label=document.createElement('strong');label.textContent=key.name;let sub=document.createElement('small');sub.textContent='创建于 '+new Date(key.createdAt).toLocaleString();info.append(label,sub);let revoke=document.createElement('button');revoke.className='danger compact';revoke.textContent='停用';revoke.onclick=async()=>{if(!confirm('停用“'+key.name+'”？使用此密钥的电脑重连时会失败。'))return;try{await api('keys/'+key.id,{method:'DELETE'});message('已停用该密钥');await load()}catch(e){message(e.message,true)}};row.append(info,revoke);list.append(row)}
+}catch(e){$('connection').textContent='连接失败';message(e.message,true)}}
+$('saveWss').onclick=async()=>{try{let data=await api('public-wss',{method:'POST',body:JSON.stringify({publicWss:$('publicWss').value.trim()})});$('currentWss').textContent=data.publicWss;message('地址已保存');}catch(e){message(e.message,true)}};
+$('copyWss').onclick=async()=>{try{await navigator.clipboard.writeText($('currentWss').textContent);message('已复制 WSS 地址')}catch{message('复制失败，请手动选中地址',true)}};
+$('createKey').onclick=async()=>{try{let data=await api('keys',{method:'POST',body:JSON.stringify({name:$('keyName').value.trim(),token:$('keyValue').value||undefined})});$('newKey').classList.remove('hidden');$('secret').textContent=data.token;$('keyName').value='';$('keyValue').value='';message('连接密钥已生成');await load()}catch(e){message(e.message,true)}};
+$('copyKey').onclick=async()=>{try{await navigator.clipboard.writeText($('secret').textContent);message('已复制连接密钥')}catch{message('复制失败，请手动选中密钥',true)}};
+load();
+</script></body></html>`;

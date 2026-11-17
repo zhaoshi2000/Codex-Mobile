@@ -56,11 +56,13 @@
 
 Windows x64 便携包解压后，双击 `Open AstroGate Connect.cmd`。它使用包内的 Node.js 和依赖。请先打开并登录 Codex 桌面版。已配置的电脑直接出码，首次配置的电脑输入自己的中转 WSS 地址和连接密钥。密钥和配对状态保存在当前 Windows 用户目录。若需要修改中转配置，先停止当前连接进程，再运行 `"Open AstroGate Connect.cmd" -Configure`。
 
+中转管理员可在 HTTPS 管理页复制 WSS 地址、创建连接密钥，再粘贴到首次配置窗口。现有 Nginx `/ifile-connect/` 路径下，管理页通常是 `https://你的域名/ifile-connect/admin/`。后台登录密码与连接密钥不同，不要在连接窗口输入后台登录密码。新生成的连接密钥只展示一次，后续可撤销；撤销后使用该密钥的电脑需要更新配置。服务器尚未部署新管理服务时，继续使用原来的 WSS 地址和连接密钥。
+
 手动运行源码时，需要 Node.js 22+，打开且登录 Codex 桌面版。
 
 1. `npm ci --ignore-scripts`
 2. 复制 `bridge.config.example.json` 为 `bridge.config.json`，填入实际路径和中转 WSS 地址。
-3. 用环境变量 `IFILE_RELAY_TOKEN` 提供中转管理员密钥，不要写进源码或分享二维码。
+3. 用环境变量 `IFILE_RELAY_TOKEN` 提供中转连接密钥，不要写进源码或分享二维码；后台登录密码另行配置。
 4. `npm run doctor -- bridge.config.json`
 5. `npm run bridge -- bridge.config.json`
 6. 用 iFile+ → Codex → + 扫描程序提示位置的 `pairing.png`；两分钟内有效且只能用于一部新手机。过期不撤销已配对身份，也不会断开已建立的连接。
@@ -77,7 +79,11 @@ Windows 使用 `start.ps1 -Config 完整配置路径` 启动并显示桌面二�
 
 ## 中转部署
 
-Dockerfile 只包含 Node 中转代码。设置随机 32 字符以上的 `IFILE_RELAY_TOKEN`，容器端口 8787 只绑定服务器回环地址，前面用已有 HTTPS 反向代理。不要直接把未加 TLS 的中转端口开放到公网。
+Dockerfile 只包含 Node 中转代码。设置随机 32 字符以上的 `IFILE_RELAY_TOKEN` 作为兼容旧电脑的连接密钥；管理后台另设 `IFILE_RELAY_ADMIN_PASSWORD`，不得与连接密钥相同。容器端口 8787 只绑定服务器回环地址，前面用已有 HTTPS 反向代理。不要直接把未加 TLS 的中转端口开放到公网。
+
+管理后台使用同一 HTTPS 入口的 `/ifile-connect/admin/`。启动中转时设置 `IFILE_RELAY_ADMIN_PASSWORD`（至少 20 字符）、`IFILE_RELAY_CONFIG_PATH=/data/relay-admin.json` 和 `IFILE_RELAY_PUBLIC_WSS=wss://你的域名/ifile-connect`；将服务器上的持久目录挂载为容器 `/data`，并给容器用户写权限。浏览器使用用户名 `admin` 和单独的后台密码登录。后台可复制 WSS 地址、查看在线连接数、创建或停用电脑连接密钥。新密钥仅在创建时展示一次，配置文件只保存其 SHA-256 摘要；原 `IFILE_RELAY_TOKEN` 继续有效，旧电脑不用重新配对。停用密钥后，该电脑下一次连接会被拒绝，需在电脑端更新密钥。修改页面中的 WSS 地址只改变提供给电脑复制的地址；域名、证书和 Nginx 路由仍需在服务器配置。
+
+若启用独立语音中转，给语音容器只读挂载同一 `/data/relay-admin.json` 并设置相同的 `IFILE_RELAY_CONFIG_PATH`，新密钥才能用于语音输入；停用新密钥对语音请求立即生效。后台密码、连接密钥和私有配置目录不得上传源码仓库。
 
 示例 Nginx 独立路径（`proxy_pass` 末尾 `/` 必须保留）：
 

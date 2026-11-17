@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { speechClient, validateSpeech, MAX_SPEECH_BYTES } from '../src/speech.mjs';
 import { createSpeechRelay } from '../src/speech-relay.mjs';
 
@@ -60,4 +63,34 @@ test('relay rejects unauthenticated and malformed audio before forwarding', asyn
     assert.deepEqual(await result.json(), { text: '你好', sequence: 0, final: false });
     assert.equal(forwarded, 1);
   } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('speech relay accepts new admin keys and revocation without restart while retaining the legacy key', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'astrogate-speech-keys-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const configPath = join(directory, 'relay-config.json');
+  const newKey = 'new-speech-and-host-key-'.repeat(3);
+  const hash = createHash('sha256').update(newKey).digest('hex');
+  await writeFile(configPath, JSON.stringify({ version: 1, publicWss: 'wss://example.test/ifile-connect',
+    keys: [{ id: randomUUID(), name: '新电脑', hash, createdAt: new Date().toISOString() }] }));
+  let calls = 0;
+  const server = createSpeechRelay({ token, configPath, fetchImpl: async (_, options) => {
+    calls++;
+    return Response.json({ text: '可以识别', sequence: JSON.parse(options.body).sequence });
+  } });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const url = `http://127.0.0.1:${server.address().port}/speech`;
+  const send = (key) => fetch(url, { method: 'POST', headers: {
+    Authorization: 'Bearer ' + key, 'Content-Type': 'application/json',
+  }, body: JSON.stringify(chunk()) });
+  assert.equal((await send(newKey)).status, 200);
+  assert.equal((await send(token)).status, 200);
+  assert.equal((await send('not-a-real-key-'.repeat(4))).status, 401);
+  await writeFile(configPath, JSON.stringify({ version: 1, keys: [] }));
+  assert.equal((await send(newKey)).status, 401);
+  assert.equal((await send(token)).status, 200);
+  await writeFile(configPath, '{bad json');
+  assert.equal((await send(newKey)).status, 401);
+  assert.equal(calls, 3);
 });

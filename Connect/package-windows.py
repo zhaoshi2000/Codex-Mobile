@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='astrogate-package-') as temp:
 
 1. 在这台电脑安装、登录并打开 Codex 桌面版。
 2. 将 ZIP 完整解压到任意可写目录；双击 Open AstroGate Connect.cmd。
-3. 首次输入中转 WSS 地址与连接密钥。使用已有中转即可，无需再部署一台服务器。
+3. 首次从中转管理后台复制 WSS 地址与连接密钥。使用已有中转即可，无需再部署一台服务器。
    注意：这是中转连接密钥，不是 AI API Key。
 4. 手机 AstroGate 管家 → 连接 → ＋ → 扫描电脑显示的二维码。
 5. 首次连接成功后自动设置当前 Windows 用户登录自启。保留解压目录，重启后登录 Windows 即可恢复连接，无需重新扫码。
