@@ -1,6 +1,6 @@
 # 内置 ZeroTier 与主机服务
 
-AstroGate 的 iOS 客户端使用 libzt 用户态网络栈，不调用或依赖手机上的 ZeroTier App，也不安装系统 VPN。服务 → ZeroTier 中填写网络 ID、启用网络，并在网络管理后台授权显示的节点 ID。节点身份保存在 App 的受保护数据目录中，关闭再开启复用身份。删除 App 会删除其身份。
+AstroGate 的 iOS 和 Android 客户端使用 libzt 用户态网络栈，不调用或依赖手机上的 ZeroTier App，也不安装系统 VPN。服务 → ZeroTier 中填写网络 ID、启用网络，并在网络管理后台授权显示的节点 ID。节点身份保存在 App 的受保护数据目录中，关闭再开启复用身份。删除 App 会删除其身份。
 
 ## 使用
 
@@ -27,4 +27,6 @@ python3 scripts/build-zerotier.py
 - `Tests/EmbeddedNetworkSmoke.swift`：在独立私有测试网络中使用实际 iOS SDK，验证 HTTP、FTP 上传/下载字节一致性，以及停启后身份复用。测试需要授权测试节点，完成后撤销并删除测试网络。
 - HTTPS 自签证书不会自动忽略验证；安装可信证书或使用已有有效证书。
 
-功能入口为 iOS。本次 SDK 不包含 Android 二进制；Android 内置网络需单独适配，不能复用 iOS XCFramework。
+Android 10 及以上从 0.2.0 支持这些入口。运行 `python scripts/build-zerotier-android.py --sdk <Android SDK 路径>`，使用 NDK 28.2.13676358 和 CMake 3.22.1 构建四种 ABI，随后按 [Android 构建说明](../Android/README.md)生成 APK。SDK 与 iOS 使用相同固定源码版本；JNI 包装修复阻塞 I/O 持有 GC 临界数组、偏移写入和关闭节点错误分离 Java 线程的问题。产物保存在忽略提交的 `Build/AndroidZeroTier/`。
+
+Android 网页使用带随机认证的本地 HTTP/CONNECT 代理，只有所选主机和端口允许通过；代理凭据不会转发给网页服务。代理绑定 127.0.0.1，远程 WebView 没有原生桥，关闭窗口回收连接和代理配置。需要系统 WebView 支持 AndroidX 的代理覆盖与反向排除规则，旧版本会提示更新。配置依据 [AndroidX ProxyConfig 文档](https://developer.android.com/reference/androidx/webkit/ProxyConfig.Builder)。

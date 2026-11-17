@@ -27,6 +27,9 @@ public class MainActivity extends Activity {
   private final ExecutorService workers = Executors.newFixedThreadPool(6);
   private CodexClient codex;
   private Servers servers;
+  private EmbeddedZeroTier network;
+  private HostWebWindow hostWeb;
+  private volatile java.net.Socket directDownload;
   private final AIClient ai = new AIClient();
   private String pickerId, scanId;
   private volatile boolean cancelDownload;
@@ -54,6 +57,7 @@ public class MainActivity extends Activity {
       if (!state.has("servers")) state.put("servers", new JSONArray());
       codex = new CodexClient(this::event);
       servers = new Servers(this::event);
+      network = EmbeddedZeroTier.get(this);
       web = new WebView(this);
       android.widget.FrameLayout container = new android.widget.FrameLayout(this);
       container.addView(web, new android.widget.FrameLayout.LayoutParams(-1, -1));
@@ -170,6 +174,7 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onDestroy() {
+    if (hostWeb != null) hostWeb.close();
     if (codex != null) codex.disconnect();
     if (servers != null) servers.close();
     ai.cancel();
@@ -216,6 +221,7 @@ public class MainActivity extends Activity {
                 & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
             == android.content.res.Configuration.UI_MODE_NIGHT_YES);
     out.remove("identity");
+    out.remove("questionAnswers");
     for (String kind : new String[] {"devices", "servers"}) {
       JSONArray list = out.getJSONArray(kind);
       for (int i = 0; i < list.length(); i++) {
@@ -233,6 +239,7 @@ public class MainActivity extends Activity {
       config.remove("apiKey");
     }
     out.put("connected", codex.connected());
+    out.put("zeroTier", network.state());
     return out;
   }
 
@@ -330,8 +337,10 @@ public class MainActivity extends Activity {
     String cacheKey = currentHost + "|" + p.toString();
     String cached = previews.get(cacheKey);
     if (cached != null && local(cached).exists()) return fileInfo(local(cached));
+    if (p.optBoolean("direct")) network.requireReady();
+    boolean preview=p.optBoolean("preview");
     cancelDownload = false;
-    progress("正在准备文件", 0, 0, "preparing");
+    if(!preview) progress("正在准备文件", 0, 0, "preparing");
     JSONObject info = codex.request("filePrepare", p);
     String id = info.getString("id"), name = info.getString("name");
     long size = info.getLong("size");
@@ -341,6 +350,21 @@ public class MainActivity extends Activity {
       MessageDigest hash = MessageDigest.getInstance("SHA-256");
       long offset = 0;
       try (OutputStream output = new FileOutputStream(temp)) {
+        if (p.optBoolean("direct")) {
+          JSONObject route=info.getJSONObject("direct");String target=route.getString("path");
+          if(!target.matches("/[0-9a-f]{64}")) throw new IOException("电脑返回的直连地址无效");
+          try(java.net.Socket socket=network.connect(route.getString("host"),route.getInt("port"))) {
+            directDownload=socket;
+            socket.getOutputStream().write(("GET "+target+" HTTP/1.1\r\nHost: "+route.getString("host")+"\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            InputStream input=socket.getInputStream();
+            if(!HostWebProxy.line(input).matches("HTTP/1[.][01] 200 .*"))throw new IOException("直连下载失败");
+            long length=-1;int headers=0;
+            for(String h;!(h=HostWebProxy.line(input)).isEmpty();){headers+=h.length();if(headers>32768)throw new IOException("响应头过长");if(h.toLowerCase(Locale.ROOT).startsWith("content-length:"))length=Long.parseLong(h.substring(h.indexOf(':')+1).trim());}
+            if(length!=size)throw new IOException("直连文件长度不符");
+            byte[] buffer=new byte[65536];
+            while(offset<size){if(cancelDownload)throw new IOException("下载已取消");int n=input.read(buffer,0,(int)Math.min(buffer.length,size-offset));if(n<0)throw new EOFException("文件传输不完整");output.write(buffer,0,n);hash.update(buffer,0,n);offset+=n;progress(name,offset,size,"receiving");}
+          } finally {directDownload=null;}
+        }
         while (offset < size) {
           if (cancelDownload) throw new Exception("下载已取消");
           JSONObject chunk =
@@ -353,19 +377,19 @@ public class MainActivity extends Activity {
           output.write(bytes);
           hash.update(bytes);
           offset += bytes.length;
-          progress(name, offset, size, "receiving");
+          if(!preview) progress(name, offset, size, "receiving");
         }
       }
-      progress(name, size, size, "verifying");
+      if(!preview) progress(name, size, size, "verifying");
       if (!hex(hash.digest()).equals(info.getString("sha256"))) throw new Exception("文件完整性校验失败");
       File target = unique("Codex 下载", name);
       Files.move(temp.toPath(), target.toPath());
       JSONObject file = fileInfo(target);
       previews.put(cacheKey, file.getString("path"));
-      event(new JSONObject().put("event", "download").put("phase", "saved").put("file", file));
+      if(!preview) event(new JSONObject().put("event", "download").put("phase", "saved").put("file", file));
       return file;
     } catch (Exception e) {
-      event(
+      if(!preview) event(
           new JSONObject()
               .put("event", "download")
               .put("phase", "failed")
@@ -488,7 +512,7 @@ public class MainActivity extends Activity {
   }
 
   private Object ftp(String operation, JSONObject p, JSONObject server) throws Exception {
-    try (FTPFiles ftp = new FTPFiles(server)) {
+    try (FTPFiles ftp = new FTPFiles(server, network)) {
       String path = p.optString("path", ".");
       switch (operation) {
         case "sftpList":
@@ -549,6 +573,8 @@ public class MainActivity extends Activity {
     }
   }
 
+  private String questionKey(JSONObject p) throws Exception { return currentHost+"|"+p.getString("threadId")+"|"+p.getString("groupId"); }
+
   private Object dispatch(String operation, JSONObject p) throws Exception {
     if (operation.startsWith("sftp")
         && find("servers", p.getString("id")).optString("type").equals("ftp"))
@@ -557,6 +583,44 @@ public class MainActivity extends Activity {
       case "exit":
         runOnUiThread(this::finish);
         return true;
+      case "questionState": {
+        synchronized(this) {
+          JSONObject all=state.optJSONObject("questionAnswers");
+          return all==null?new JSONObject():all.optJSONObject(questionKey(p))==null?new JSONObject():new JSONObject(all.getJSONObject(questionKey(p)).toString());
+        }
+      }
+      case "questionSubmit": {
+        JSONObject entry;
+        synchronized(this) {
+          JSONObject all=state.optJSONObject("questionAnswers");if(all==null){all=new JSONObject();state.put("questionAnswers",all);}
+          entry=all.optJSONObject(questionKey(p));
+          if(entry!=null && !entry.optString("state").equals("notSubmitted"))throw new Exception("请先核实上次回答的提交状态");
+          entry=new JSONObject().put("id",UUID.randomUUID().toString()).put("state","unknown").put("answers",p.getJSONObject("answers"));
+          all.put(questionKey(p),entry);save();
+        }
+        JSONObject result=codex.request("answer",new JSONObject().put("threadId",p.getString("threadId")).put("groupId",p.getString("groupId")).put("messageId",entry.getString("id")).put("answers",entry.getJSONObject("answers")));
+        synchronized(this){entry.put("state",result.optString("state","unknown"));save();}
+        return entry;
+      }
+      case "questionStatus": {
+        JSONObject entry;
+        synchronized(this){entry=state.getJSONObject("questionAnswers").getJSONObject(questionKey(p));}
+        JSONObject result=codex.request("answerStatus",new JSONObject().put("threadId",p.getString("threadId")).put("groupId",p.getString("groupId")).put("messageId",entry.getString("id")));
+        synchronized(this){entry.put("state",result.optString("state","unknown"));save();}
+        return entry;
+      }
+      case "ztLicense": {
+        String text;try(InputStream input=getAssets().open("ZeroTierNotices.txt")){ByteArrayOutputStream output=new ByteArrayOutputStream();byte[] b=new byte[8192];for(int n;(n=input.read(b))!=-1;)output.write(b,0,n);text=output.toString("UTF-8");}
+        String notices=text;runOnUiThread(()->new AlertDialog.Builder(this).setTitle("开源许可").setMessage(notices).setPositiveButton("关闭",null).show());return true;
+      }
+      case "zeroTierState": return network.state();
+      case "zeroTierConfigure": return network.configure(p.optBoolean("enabled"),p.optString("networkID"));
+      case "hostWeb": {
+        if (!codex.connected() && !p.optBoolean("direct")) throw new Exception("请先在连接页连接电脑");
+        if (hostWeb != null) hostWeb.close();
+        hostWeb = new HostWebWindow(this,codex,network,p.getString("url"),p.optBoolean("direct")?p.getString("host"):null);
+        return true;
+      }
       case "boot":
         return boot();
       case "pair":
@@ -604,6 +668,7 @@ public class MainActivity extends Activity {
             }
             secret = SecureWire.un64(state.getString("identity"));
           }
+          if (hostWeb != null) {hostWeb.close();hostWeb=null;}
           currentHost = device.getString("hostId");
           JSONObject ready = codex.connect(device, secret);
           device.remove("pairToken");
@@ -612,6 +677,7 @@ public class MainActivity extends Activity {
           return ready;
         }
       case "disconnect":
+        if (hostWeb != null) {hostWeb.close();hostWeb=null;}
         codex.disconnect();
         return true;
       case "rpc":
@@ -659,6 +725,7 @@ public class MainActivity extends Activity {
         }
       case "cancelDownload":
         cancelDownload = true;
+        if(directDownload!=null)try{directDownload.close();}catch(IOException ignored){}
         return true;
       case "upload":
         return upload(p);

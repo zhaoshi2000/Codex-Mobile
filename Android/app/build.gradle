@@ -2,13 +2,17 @@ plugins { id 'com.android.application' }
 android {
     namespace 'sbs.astrogate.manager'
     compileSdk 35
-    defaultConfig { applicationId 'sbs.astrogate.manager'; minSdk 29; targetSdk 35; versionCode 3; versionName '0.1.2' }
+    defaultConfig { applicationId 'sbs.astrogate.manager'; minSdk 29; targetSdk 35; versionCode 4; versionName '0.2.0' }
+    sourceSets.main.java.srcDir '../../Build/AndroidZeroTier/source/src/bindings/java'
+    sourceSets.main.jniLibs.srcDir '../../Build/AndroidZeroTier/jniLibs'
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     buildTypes { release { minifyEnabled false } }
     testOptions { unitTests.returnDefaultValues = true }
-    packaging { resources { excludes += ['META-INF/versions/**/OSGI-INF/MANIFEST.MF'] } }
+    // Compress native libraries so Android extracts them with the device page alignment.
+    packaging { jniLibs { useLegacyPackaging true }; resources { excludes += ['META-INF/versions/**/OSGI-INF/MANIFEST.MF'] } }
 }
 dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'org.bouncycastle:bcprov-jdk18on:1.80'
     implementation 'com.github.mwiede:jsch:0.2.26'
@@ -19,3 +23,13 @@ dependencies {
     testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
     testImplementation 'com.squareup.okhttp3:okhttp-tls:4.12.0'
 }
+
+tasks.register('verifyZeroTier') {
+    doLast {
+        for (abi in ['arm64-v8a','armeabi-v7a','x86_64','x86']) {
+            if (!file('../../Build/AndroidZeroTier/jniLibs/' + abi + '/libzt.so').exists())
+                throw new GradleException('Build embedded SDK first: python scripts/build-zerotier-android.py --sdk <ANDROID_HOME>')
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'verifyZeroTier' }

@@ -9,7 +9,10 @@ await fs.mkdir('Build',{recursive:true});
 const root=path.resolve('Android/app/src/main/assets'),checks=[];
 const mock=`window.fixture={devices:[{hostId:'pc-a',name:'电脑 A'},{hostId:'pc-b',name:'电脑 B'}],servers:[{id:'ssh',name:'SSH 测试',type:'ssh',host:'example.invalid'},{id:'sftp',name:'文件服务',type:'sftp',host:'example.invalid'},{id:'oc',name:'OpenClaw',type:'openclaw',host:'example.invalid'}]};
 window.Native={call(id,op,json){let p=JSON.parse(json),r={};if(op==='boot')r=fixture;if(op==='localList'||op==='sftpList')r=[];
-if(op==='rpc'){switch(p.method){case 'quota':r={available:true,windows:[{id:'codex:primary',label:'周额度',remainingPercent:11,resetsAt:2000000000}]};break;case 'threads':r={threads:[{id:'chat-'+window.pc,title:'测试对话 '+window.pc}]};break;case 'navigation':r={projects:[{id:'p1',name:'项目一'}],unread:[]};break;case 'activity':r={tasks:[]};break;case 'watch':r={writable:true};break;case 'history':r={messages:[{id:'m1',role:'assistant',text:'测试回复',turnId:'turn1'}]};break;case 'models':r={models:[],current:{model:'test'}};break;case 'queued':r={messages:[]};break;}}
+window.calls??=[];window.calls.push({op,p});
+if(op==='questionSubmit')r={state:'accepted',answers:p.answers};
+if(op==='zeroTierState')r={enabled:false,status:'已关闭',nodeID:'abc1234567'};
+if(op==='rpc'){switch(p.method){case 'quota':r={available:true,windows:[{id:'codex:primary',label:'周额度',remainingPercent:11,resetsAt:2000000000}]};break;case 'threads':r={threads:[{id:'chat-'+window.pc,title:'测试对话 '+window.pc}]};break;case 'navigation':r={projects:[{id:'p1',name:'项目一'}],unread:[]};break;case 'activity':r={tasks:[]};break;case 'watch':r={writable:true};break;case 'history':r={messages:[{id:'m1',role:'assistant',text:'测试回复',turnId:'turn1'}]};break;case 'models':r={models:[{id:'test',name:'Test',efforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],defaultEffort:'low'},{id:'other',name:'Other',efforts:[{reasoningEffort:'medium'}],defaultEffort:'medium'}],current:{model:'test',reasoningEffort:'high'}};break;case 'queued':r={messages:[]};break;}}
 if(op==='openclaw'){queueMicrotask(()=>nativeReply({id,error:'Gateway connection refused'}));return;}
 if(op==='connect')window.pc=p.id;
 if(op==='pair'){fixture.devices.push({hostId:'pc-c',name:'电脑 C'});r=fixture;}
@@ -38,6 +41,25 @@ try{
  await check('Selecting computer opens Codex projects and conversations',`s.tab==='codex'&&s.route==='threads'&&s.device.hostId==='pc-a'&&document.querySelector('#projectlist')!==null`);
  await click('[data-action=thread]');
  await check('Chat opens in first tab',`s.tab==='codex'&&s.thread.id==='chat-pc-a'&&document.querySelector('#page').textContent.includes('测试回复')`);
+ await run(`s.questions=[{id:'question-test',questions:[{id:'q1',title:'接入方式',options:[{label:'内置',description:'无需其他 App'}]},{id:'q2',title:'补充说明',options:[]}]}];renderQuestions();`);
+ await new Promise(r=>setTimeout(r,150));
+ await check('Questions require every answer or explicit skip',`document.querySelector('[data-action=answer]').disabled`);
+ await click('[data-action=answerOption]');await click('[data-action=skipAnswer][data-question="1"]');
+ await check('Whole-row choice plus skip enables submit',`!document.querySelector('[data-action=answer]').disabled&&s.answers['question-test'].q1==='内置'&&s.answers['question-test'].q2===SKIPPED_ANSWER`);
+ await click('[data-action=answer]');
+ await check('Submission is durable and UI locks accepted answer',`s.qstates[questionKey(s.questions[0])].state==='accepted'&&document.querySelector('[data-action=answerOption]').disabled&&window.calls.filter(c=>c.op==='questionSubmit').length===1`);
+ await run(`s.qstates[questionKey(s.questions[0])]={state:'unknown'};renderQuestions();`);
+ await check('Unknown delivery only offers status check, no replay',`document.querySelector('[data-action=answerStatus]')!==null&&document.querySelector('[data-action=answer]')===null&&document.querySelector('[data-action=skipAllAnswers]')===null`);
+ await run(`s.questions=[];renderQuestions();`);
+ await run(`void modelPicker()`);await new Promise(r=>setTimeout(r,150));
+ await check('Model and effort selectors display only supported choices',`document.querySelector('#modal [name=model]').options.length===2&&document.querySelector('#modal [name=effort]').value==='high'`);
+ await run(`const select=document.querySelector('#modal [name=model]');select.value='other';select.dispatchEvent(new Event('change'));`);
+ await check('Changing model refreshes supported effort and default',`document.querySelector('#modal [name=effort]').options.length===1&&document.querySelector('#modal [name=effort]').value==='medium'`);
+ await run(`window.goBack();document.querySelector('.messages').innerHTML=markdown(${JSON.stringify('说明\n\n```sh\nprintf hello\n```')});`);
+ await click('[data-action=copyCode]');
+ await check('Code copy excludes prose and button label',`window.calls.findLast(c=>c.op==='copy').p.text.trim()==='printf hello'`);
+ await run(`renderChat()`);
+
  await check('Codex quota summary shows remaining percentage',`document.querySelector('[data-quotabox]').textContent.includes('剩余 11%')`);
  await click('[data-action=quota]');
  await check('Quota details include reset time',`document.querySelector('#modal').textContent.includes('重置时间')`);
@@ -76,6 +98,10 @@ try{
  await check('Removing selected pairing clears active computer',`s.device===null&&s.thread===null&&!s.connected&&s.boot.devices.length===2`);
  await click('[data-tab=codex]');
  await check('No selected computer returns to Codex connection action',`s.route==='home'&&document.querySelector('#page [data-action=devices]')!==null`);
+ await click('[data-tab=services]');
+ await check('Services includes embedded network and host web entry',`document.querySelector('[data-action=zeroTier]')!==null&&document.querySelector('[data-action=hostWeb]')!==null`);
+ await click('[data-action=zeroTier]');
+ await check('Network configuration includes ID, toggle and authorization help',`document.querySelector('[name=networkID]')!==null&&document.querySelector('[data-action=toggleZeroTier]')!==null&&document.querySelector('#page').textContent.includes('授权')`);
  await fs.writeFile('Build/navigation-ui-results.json',JSON.stringify(checks,null,2));
  await cmd('Browser.close').catch(()=>{});
 }finally{ws?.close();chrome.kill();server.close();}

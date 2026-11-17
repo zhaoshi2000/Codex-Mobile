@@ -102,6 +102,7 @@ function render() {
   } else if (s.tab === "connect") renderDevices();
   else if (s.tab === "services" && s.route === "files") renderFiles();
   else if (s.tab === "settings") renderSettings();
+  else if (s.tab === "services" && s.route === "zerotier") renderZeroTier();
   else if (s.route === "terminal") renderTerminal();
   else if (s.route === "sftp") renderRemoteFiles();
   else if (s.route === "ai") renderAI();
@@ -113,6 +114,9 @@ function renderCodexHome() {
   showPage(empty("在手机继续 Codex 对话", "连接一台电脑，即可查看项目、继续对话或新建对话。", `<button class="primary" data-action="devices">连接电脑</button>`));
 }
 function resetCodex() {
+  s.answers = {};
+  s.qstates = {};
+  s.customAnswers = /* @__PURE__ */ new Set();
   clearTimeout(renderTimer);
   s.thread = null;
   s.messages = [];
@@ -319,7 +323,17 @@ marked.use({ renderer: { link(token) {
 } } });
 function markdown(text) {
   const raw = marked.parse(String(text || "").replace(/📄\s*(?=\[)/g, ""), { breaks: true, gfm: true });
-  return DOMPurify.sanitize(raw, { FORBID_TAGS: ["img", "style", "form", "input", "button", "iframe"], FORBID_ATTR: ["style", "id", "name", "target"], ADD_ATTR: [] });
+  const html = DOMPurify.sanitize(raw, { FORBID_TAGS: ["img", "style", "form", "input", "button", "iframe"], FORBID_ATTR: ["style", "id", "name", "target"], ADD_ATTR: [] });
+  const holder = document.createElement("div");
+  holder.innerHTML = html;
+  for (const pre of holder.querySelectorAll("pre")) {
+    const button = document.createElement("button");
+    button.className = "copycode";
+    button.dataset.action = "copyCode";
+    button.textContent = "复制";
+    pre.append(button);
+  }
+  return holder.innerHTML;
 }
 function fileParams(path) {
   return { projectId: "thread:" + s.thread.id, .../^[a-z]:[\\/]|^\//i.test(path) ? { absolutePath: path } : { relativePath: path } };
@@ -365,7 +379,7 @@ function renderChat(bottom = false) {
   renderComposer();
   loadPhotos();
   bindDetails();
-  if (bottom || !wasChat || atBottom) page.scrollTop = page.scrollHeight;
+  if ($("#preview").hidden && (bottom || !wasChat || atBottom)) page.scrollTop = page.scrollHeight;
   else page.scrollTop = previous;
   page.onscroll = () => {
     let b = $(".latest");
@@ -386,7 +400,7 @@ function renderComposer() {
   const el = $("#composer");
   el.hidden = false;
   const focus = $("#draft") === document.activeElement, selection = (_a = $("#draft")) == null ? void 0 : _a.selectionStart;
-  el.innerHTML = `<div id="downloadBox"></div><div class="attachments">${s.attachments.map((a, i) => `<span class="pill">${E(a.name)}<button data-action="removeAttachment" data-index="${i}" aria-label="移除附件">×</button></span>`).join("")}</div><div id="queueBox">${s.queue.map((q) => `<div class="queued row"><div class="grow"><div class="ellipsis">${E(q.displayText || q.text || "附件消息")}</div><small>${E(q.error || "等待当前任务完成")}</small></div><button data-action="steer" data-id="${E(q.id)}" ${q.editable === false ? "disabled" : ""}>↪ 引导</button><button data-action="removeQueued" data-id="${E(q.id)}" aria-label="删除等待消息">×</button></div>`).join("")}</div><div class="row">${btn("attach", "plus", "添加附件", 'class="attach"')}<textarea class="grow" id="draft" rows="1" maxlength="32000" placeholder="${s.busy ? "继续发送，或引导当前任务…" : "发给电脑上的 Codex…"}">${E(s.draft)}</textarea>${s.busy ? btn("stop", "stop", "停止任务") : ""}<button class="primary send" data-action="send" aria-label="发送消息" ${s.uploading || !s.connected ? "disabled" : ""}>${icon("send")}</button></div>`;
+  el.innerHTML = `<div id="downloadBox"></div><div class="attachments">${s.attachments.map((a, i) => `<span class="pill">${E(a.name)}<button data-action="removeAttachment" data-index="${i}" aria-label="移除附件">×</button></span>`).join("")}</div><div id="queueBox">${s.queue.map((q) => `<div class="queued row"><div class="grow"><div class="ellipsis">${E(q.displayText || q.text || "附件消息")}</div><small>${E(q.error || "等待当前任务完成")}</small></div><button data-action="steer" data-id="${E(q.id)}" ${q.editable === false ? "disabled" : ""}>↪ 引导</button><button data-action="removeQueued" data-id="${E(q.id)}" aria-label="删除等待消息">×</button></div>`).join("")}</div><div class="row">${btn("attach", "plus", "添加附件", 'class="attach"')}<textarea class="grow" id="draft" rows="1" maxlength="32000" placeholder="发消息…">${E(s.draft)}</textarea>${s.busy ? btn("stop", "stop", "停止任务") : ""}<button class="primary send" data-action="send" aria-label="发送消息" ${s.uploading || !s.connected ? "disabled" : ""}>${icon("send")}</button></div>`;
   $("#draft").oninput = (e) => {
     s.draft = e.target.value;
     e.target.style.height = "auto";
@@ -469,19 +483,12 @@ async function loadPhotos() {
         }
         return;
       }
-      safe(() => previewImage(images[photoSelection.get(m.id) || 0]));
+      safe(() => previewImage(images[photoSelection.get(m.id) || 0], images, photoSelection.get(m.id) || 0));
     };
     el.onkeydown = (e) => {
       if (e.key === "Enter") safe(() => previewImage(Core.attachments(s.messages.find((m) => m.id === el.dataset.photo).text).images[photoSelection.get(el.dataset.photo) || 0]));
     };
   }
-}
-async function previewImage(photo) {
-  $("#preview").hidden = false;
-  $("#preview").innerHTML = `<div class="row"><span class="grow ellipsis">${E(photo.name)}</span>${btn("closePreview", "close", "关闭图片")}</div><p>正在读取原图…</p>`;
-  const file = await call("download", fileParams(photo.path));
-  const src = await call("localImage", { path: file.path });
-  if (!$("#preview").hidden) $("#preview").innerHTML = `<div class="row"><span class="grow ellipsis">${E(photo.name)}</span>${btn("closePreview", "close", "关闭图片")}</div><img src="${src}" alt="${E(photo.name)}"><button data-action="sharePreview" data-path="${E(file.path)}">分享原图</button>`;
 }
 function bindDetails() {
   for (const el of document.querySelectorAll("[data-open-key]")) el.ontoggle = () => {
@@ -495,23 +502,6 @@ function bindDetails() {
         if (el.isConnected) el.querySelector(".detail").textContent = e.message;
       });
     }
-  };
-}
-function renderQuestions() {
-  const el = $("#questions");
-  if (!el) return;
-  el.innerHTML = s.questions.map((g) => `<div class="questions" data-group="${E(g.id)}"><strong>需要你的回答</strong>${g.questions.map((q, i) => {
-    var _a, _b;
-    return `<p>${E(q.title)}</p>${q.options.map((o) => `<button class="questionoption" data-action="answerOption" data-question="${i}" data-value="${E(o.label)}">${E(o.label)}${o.description ? `<small> · ${E(o.description)}</small>` : ""}</button>`).join("")}<input type="${q.secret ? "password" : "text"}" data-answer="${i}" placeholder="或输入回答" value="${E(((_b = (_a = s.answers) == null ? void 0 : _a[g.id]) == null ? void 0 : _b[q.id]) || "")}">`;
-  }).join("")}<button class="primary" data-action="answer" data-group="${E(g.id)}">提交回答</button></div>`).join("") + (s.awaitingApproval ? '<p class="hint">有一项电脑权限审批需要在桌面确认。</p>' : "");
-  el.oninput = (e) => {
-    var _a, _b, _c, _d;
-    const group = e.target.closest("[data-group]");
-    if (!group || !e.target.hasAttribute("data-answer")) return;
-    const g = s.questions.find((g2) => g2.id === group.dataset.group);
-    (_a = s.answers) != null ? _a : s.answers = {};
-    (_d = (_b = s.answers)[_c = g.id]) != null ? _d : _b[_c] = {};
-    s.answers[g.id][g.questions[+e.target.dataset.answer].id] = e.target.value;
   };
 }
 async function refreshQueue() {
@@ -581,11 +571,11 @@ async function loadFiles() {
 }
 function renderServers() {
   header("服务", null, btn("serverAdd", "plus", "添加服务"));
-  showPage(`<div class="card list"><button class="item" data-action="localFiles">${icon("files")}<span class="grow">文件管理器</span>›</button></div><div class="section">服务器服务</div><p class="hint">SSH 终端、SFTP / FTP 文件和 OpenClaw 会话。</p><div class="card list">${s.boot.servers.map((d) => `<div class="item"><button class="grow row" data-action="server" data-id="${E(d.id)}">${icon(d.type === "sftp" ? "files" : "codex")}<span class="grow name">${E(d.name || d.host)}<small>${E((d.type || "ssh").toUpperCase())} · ${E(d.host + ":" + (d.port || 22))}</small></span></button>${btn("serverMenu", "more", "服务器选项", `data-id="${E(d.id)}"`)}</div>`).join("")}</div>${!s.boot.servers.length ? empty("添加服务器服务", "首次连接会显示服务器指纹，确认信任后才进行登录。", `<button class="primary" data-action="serverAdd">添加服务器</button>`) : ""}`);
+  showPage(`<div class="card list"><button class="item" data-action="localFiles">${icon("files")}<span class="grow">文件管理器</span>›</button><button class="item" data-action="zeroTier">${icon("connect")}<span class="grow">ZeroTier 内置网络</span>›</button><button class="item" data-action="hostWeb">${icon("cloud")}<span class="grow">主机网页服务</span>›</button></div><div class="section">服务器服务</div><p class="hint">SSH 终端、SFTP / FTP 文件和 OpenClaw 会话。</p><div class="card list">${s.boot.servers.map((d) => `<div class="item"><button class="grow row" data-action="server" data-id="${E(d.id)}">${icon(d.type === "sftp" ? "files" : "codex")}<span class="grow name">${E(d.name || d.host)}<small>${E((d.type || "ssh").toUpperCase())} · ${E(d.host + ":" + (d.port || 22))}</small></span></button>${btn("serverMenu", "more", "服务器选项", `data-id="${E(d.id)}"`)}</div>`).join("")}</div>${!s.boot.servers.length ? empty("添加服务器服务", "首次连接会显示服务器指纹，确认信任后才进行登录。", `<button class="primary" data-action="serverAdd">添加服务器</button>`) : ""}`);
 }
 async function serverForm(id) {
   const d = s.boot.servers.find((x) => x.id === id) || {};
-  const result = await modal(id ? "编辑服务器" : "添加服务器", `${field("name", "名称", d.name)}<label>连接类型</label><select name="type">${[["ssh", "SSH 终端"], ["sftp", "SFTP 文件"], ["ftp", "FTP 文件（普通被动模式）"], ["openclaw", "OpenClaw 聊天"]].map(([v, l]) => `<option value="${v}" ${v === d.type ? "selected" : ""}>${l}</option>`).join("")}</select>${field("host", "服务器地址", d.host)}${field("port", "端口", d.port || 22, "number")}${field("username", "用户名", d.username || "root")}${field("password", id ? "密码（留空保留）" : "密码", "", "password")}${area("privateKey", id ? "SSH 私钥（留空保留）" : "SSH 私钥（可选，PEM 格式）")}${field("passphrase", "私钥口令（可选）", "", "password")}<p class="hint">SSH 私钥与 AI API Key 分开保存。普通 FTP 不加密传输。</p>${field("executable", "OpenClaw 命令或路径", d.executable || "openclaw")}${field("runUser", "OpenClaw 运行用户（留空自动识别）", d.runUser)}${field("container", "Docker 容器名（可选）", d.container)}`);
+  const result = await modal(id ? "编辑服务器" : "添加服务器", `${field("name", "名称", d.name)}<label>连接类型</label><select name="type">${[["ssh", "SSH 终端"], ["sftp", "SFTP 文件"], ["ftp", "FTP 文件（普通被动模式）"], ["openclaw", "OpenClaw 聊天"]].map(([v, l]) => `<option value="${v}" ${v === d.type ? "selected" : ""}>${l}</option>`).join("")}</select>${field("host", "服务器地址", d.host)}${field("port", "端口", d.port || 22, "number")}<label><input name="useZeroTier" type="checkbox" ${d.useZeroTier ? "checked" : ""}> FTP 通过内置 ZeroTier 连接</label>${field("username", "用户名", d.username || "root")}${field("password", id ? "密码（留空保留）" : "密码", "", "password")}${area("privateKey", id ? "SSH 私钥（留空保留）" : "SSH 私钥（可选，PEM 格式）")}${field("passphrase", "私钥口令（可选）", "", "password")}<p class="hint">SSH 私钥与 AI API Key 分开保存。普通 FTP 不加密传输。</p>${field("executable", "OpenClaw 命令或路径", d.executable || "openclaw")}${field("runUser", "OpenClaw 运行用户（留空自动识别）", d.runUser)}${field("container", "Docker 容器名（可选）", d.container)}`);
   if (!result) return;
   result.port = Number(result.port);
   if (id) result.id = id;
@@ -666,7 +656,7 @@ function renderRemoteFiles() {
 function renderSettings() {
   const a = s.boot.ai || {};
   header("设置");
-  showPage(`<div class="section">AI 中转站</div><div class="card">${field("address", "API 地址", a.address || "", "url")}${field("apiKey", a.hasKey ? "API Key（已保存，留空保留）" : "API Key", "", "password")}<label>模型</label><select name="model" id="aiModel">${a.model ? `<option>${E(a.model)}</option>` : '<option value="">获取模型后选择</option>'}</select><div class="row"><button data-action="fetchModels">获取模型</button><button class="primary" data-action="saveAI">保存</button></div><p class="hint" id="modelStatus">填写地址和 API Key 后自动获取可选模型。凭据由 Android 系统密钥加密保存。</p></div><div class="card list"><button class="item" data-action="enableNotifications">${icon("check")}开启任务完成提醒</button><button class="item" data-action="projectSite">${icon("codex")}源码与使用说明</button></div><p class="hint">AstroGate 管家 · Android 0.1.0<br>支持 Android 10 及以上。保持电脑连接程序运行，后台恢复时会重新同步会话。</p>`);
+  showPage(`<div class="section">AI 中转站</div><div class="card">${field("address", "API 地址", a.address || "", "url")}${field("apiKey", a.hasKey ? "API Key（已保存，留空保留）" : "API Key", "", "password")}<label>模型</label><select name="model" id="aiModel">${a.model ? `<option>${E(a.model)}</option>` : '<option value="">获取模型后选择</option>'}</select><div class="row"><button data-action="fetchModels">获取模型</button><button class="primary" data-action="saveAI">保存</button></div><p class="hint" id="modelStatus">填写地址和 API Key 后自动获取可选模型。凭据由 Android 系统密钥加密保存。</p></div><div class="card list"><button class="item" data-action="enableNotifications">${icon("check")}开启任务完成提醒</button><button class="item" data-action="projectSite">${icon("codex")}源码与使用说明</button></div><p class="hint">AstroGate 管家 · Android 0.2.0<br>支持 Android 10 及以上。保持电脑连接程序运行，后台恢复时会重新同步会话。</p>`);
   for (const input of document.querySelectorAll("#page input")) input.addEventListener("input", () => {
     clearTimeout(renderSettings.timer);
     const values = aiFields();
@@ -919,10 +909,12 @@ document.addEventListener("click", (e) => {
     e.preventDefault();
     const href = link.getAttribute("href") || "";
     safe(async () => {
-      if (/^https?:\/\//i.test(href)) await call("browser", { url: href });
-      else if ((href.startsWith("#local=") || Core.localLink(href)) && s.thread) {
+      if (/^https?:\/\//i.test(href)) {
+        if (hostServiceLink(href)) await hostWeb(href);
+        else await call("browser", { url: href });
+      } else if ((href.startsWith("#local=") || Core.localLink(href)) && s.thread) {
         const path = decodeURIComponent(href.replace(/^#local=/, "")).replace(/^file:\/\//i, "").replace(/:\d+$/, "");
-        await call("download", fileParams(path));
+        await chooseDownload(fileParams(path));
       } else toast("此链接暂不支持");
     });
     return;
@@ -933,8 +925,51 @@ document.addEventListener("click", (e) => {
   safe(() => action(b.dataset.action, b));
 });
 async function action(a, b) {
-  var _a, _b, _c, _d;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
   switch (a) {
+    case "servicesHome":
+      s.tab = "services";
+      s.route = "servers";
+      render();
+      break;
+    case "zeroTier":
+      s.zeroTier = await call("zeroTierState");
+      s.route = "zerotier";
+      s.tab = "services";
+      render();
+      break;
+    case "toggleZeroTier": {
+      const id = $("[name=networkID]").value.trim(), enabled = !((_a = s.zeroTier) == null ? void 0 : _a.enabled);
+      s.ztChanging = true;
+      renderZeroTier();
+      try {
+        s.zeroTier = await call("zeroTierConfigure", { enabled, networkID: id });
+      } finally {
+        s.ztChanging = false;
+        renderZeroTier();
+      }
+      break;
+    }
+    case "copyNode":
+      await call("copy", { text: ((_b = s.zeroTier) == null ? void 0 : _b.nodeID) || "" });
+      toast("节点 ID 已复制");
+      break;
+    case "ztLicense":
+      await call("ztLicense");
+      break;
+    case "hostWeb":
+      await hostWeb();
+      break;
+    case "copyCode":
+      await call("copy", { text: ((_c = b.parentElement.querySelector("code")) == null ? void 0 : _c.textContent) || "" });
+      b.textContent = "已复制";
+      break;
+    case "previousImage":
+      if (previewIndex > 0) await previewImage(previewGallery[previewIndex - 1], previewGallery, previewIndex - 1);
+      break;
+    case "nextImage":
+      if (previewIndex + 1 < previewGallery.length) await previewImage(previewGallery[previewIndex + 1], previewGallery, previewIndex + 1);
+      break;
     case "tab":
       s.tab = b.dataset.tab;
       $("#drawer").hidden = true;
@@ -955,7 +990,7 @@ async function action(a, b) {
         if (v.__choice === "delete") {
           if (await confirm("删除设备", "移除此手机保存的配对？")) {
             s.boot = await call("remove", { kind: "devices", id });
-            if (((_a = s.device) == null ? void 0 : _a.hostId) === id) {
+            if (((_d = s.device) == null ? void 0 : _d.hostId) === id) {
               clearTimeout(reconnectTimer);
               resetCodex();
               s.device = null;
@@ -964,7 +999,7 @@ async function action(a, b) {
           }
         } else {
           s.boot = await call("renameDevice", { id, name: v.name });
-          if (((_b = s.device) == null ? void 0 : _b.hostId) === id) s.device = s.boot.devices.find((x) => x.hostId === id);
+          if (((_e = s.device) == null ? void 0 : _e.hostId) === id) s.device = s.boot.devices.find((x) => x.hostId === id);
         }
         renderDevices();
       }
@@ -1044,16 +1079,9 @@ async function action(a, b) {
     case "quota":
       await showQuota();
       break;
-    case "models": {
-      const r = await rpc("models", { threadId: s.thread.id });
-      const v = await modal("选择模型", `<select name="model">${r.models.map((m) => `<option value="${E(m.id)}" ${m.id === s.model ? "selected" : ""}>${E(m.name || m.id)}</option>`).join("")}</select>`);
-      if (v) {
-        const result = await rpc("setModel", { threadId: s.thread.id, model: v.model });
-        s.model = ((_c = result.current) == null ? void 0 : _c.model) || v.model;
-        renderStatus();
-      }
+    case "models":
+      await modelPicker();
       break;
-    }
     case "copyReply": {
       const g = Core.groups(s.messages).find((g2) => g2.key === b.dataset.id);
       await call("copy", { text: g.messages.filter((m) => m.role === "assistant").map((m) => m.text).join("\n\n") });
@@ -1078,20 +1106,32 @@ async function action(a, b) {
     case "bottom":
       $("#page").scrollTo({ top: $("#page").scrollHeight, behavior: "smooth" });
       break;
-    case "answerOption": {
-      const el = b.closest("[data-group]"), input = el.querySelector(`[data-answer="${b.dataset.question}"]`);
-      input.value = b.dataset.value;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      el.querySelectorAll(`[data-question="${b.dataset.question}"]`).forEach((x) => x.classList.toggle("selected", x === b));
+    case "answerOption":
+    case "skipAnswer":
+    case "customAnswer": {
+      const box = b.closest("[data-group]"), g = s.questions.find((g2) => g2.id === box.dataset.group), i = +b.dataset.question, q = g.questions[i];
+      (_f = s.answers) != null ? _f : s.answers = {};
+      (_i = (_g = s.answers)[_h = g.id]) != null ? _i : _g[_h] = {};
+      (_j = s.customAnswers) != null ? _j : s.customAnswers = /* @__PURE__ */ new Set();
+      if (a === "customAnswer") {
+        s.customAnswers.add(questionKey(g) + "|" + i);
+        s.answers[g.id][q.id] = "";
+      } else {
+        s.customAnswers.delete(questionKey(g) + "|" + i);
+        s.answers[g.id][q.id] = a === "skipAnswer" ? s.answers[g.id][q.id] === SKIPPED_ANSWER ? "" : SKIPPED_ANSWER : b.dataset.value;
+      }
+      renderQuestions();
       break;
     }
-    case "answer": {
-      const g = s.questions.find((g2) => g2.id === b.dataset.group), r = await rpc("answer", { threadId: s.thread.id, groupId: g.id, messageId: Core.uuid(), answers: ((_d = s.answers) == null ? void 0 : _d[g.id]) || {} });
-      if (r.state === "unknown") toast("答案送达情况待确认");
-      else {
-        s.questions = s.questions.filter((x) => x.id !== g.id);
-        renderQuestions();
+    case "answer":
+    case "answerStatus":
+    case "skipAllAnswers": {
+      const g = s.questions.find((g2) => g2.id === b.dataset.group);
+      if (a === "skipAllAnswers") {
+        (_k = s.answers) != null ? _k : s.answers = {};
+        s.answers[g.id] = Object.fromEntries(g.questions.map((q) => [q.id, SKIPPED_ANSWER]));
       }
+      await submitQuestion(g, a === "answerStatus");
       break;
     }
     case "closePreview":
@@ -1310,7 +1350,7 @@ async function computerFiles(path) {
         if (f.isDirectory) await computerFiles(f.relativePath);
         else {
           $("#modal").hidden = true;
-          await call("download", { projectId: "thread:" + s.thread.id, relativePath: f.relativePath });
+          await chooseDownload({ projectId: "thread:" + s.thread.id, relativePath: f.relativePath });
         }
       });
     }
@@ -1332,3 +1372,160 @@ document.addEventListener("change", (e) => {
     if (port && ["21", "22"].includes(port.value)) port.value = e.target.value === "ftp" ? "21" : "22";
   }
 });
+const SKIPPED_ANSWER = "用户跳过此问题，未提供答案。";
+function questionKey(g) {
+  var _a, _b;
+  return ((_a = s.device) == null ? void 0 : _a.hostId) + "|" + ((_b = s.thread) == null ? void 0 : _b.id) + "|" + g.id;
+}
+function questionRecord(g) {
+  var _a;
+  (_a = s.qstates) != null ? _a : s.qstates = {};
+  return s.qstates[questionKey(g)] || {};
+}
+function renderQuestions() {
+  const el = $("#questions");
+  if (!el) return;
+  el.innerHTML = s.questions.map((g) => {
+    var _a, _b, _c;
+    const key = questionKey(g), state = questionRecord(g);
+    (_a = s.qstates) != null ? _a : s.qstates = {};
+    if (!s.qstates[key]) {
+      s.qstates[key] = { loading: true };
+      call("questionState", { threadId: s.thread.id, groupId: g.id }).then((r) => {
+        var _a2;
+        s.qstates[key] = r || {};
+        if (questionKey(g) === key) {
+          (_a2 = s.answers) != null ? _a2 : s.answers = {};
+          if (r.answers) s.answers[g.id] = r.answers;
+          renderQuestions();
+        }
+      }).catch((e) => {
+        s.qstates[key] = { error: e.message };
+        renderQuestions();
+      });
+    }
+    const locked = ((_b = s.qstates[key]) == null ? void 0 : _b.loading) || state.sending || ["unknown", "accepted"].includes(state.state), answers = ((_c = s.answers) == null ? void 0 : _c[g.id]) || {};
+    return `<div class="questions" data-group="${E(g.id)}"><strong>需要你的回答</strong>${g.questions.map((q, i) => {
+      var _a2;
+      return `<p>${E(q.title)}</p>${q.options.map((o) => `<button class="questionoption ${answers[q.id] === o.label ? "selected" : ""}" data-action="answerOption" data-question="${i}" data-value="${E(o.label)}" ${locked ? "disabled" : ""}>${answers[q.id] === o.label ? "●" : "○"} ${E(o.label)}${o.description ? `<small>${E(o.description)}</small>` : ""}</button>`).join("")}<div class="row questiontools"><button data-action="customAnswer" data-question="${i}" ${locked ? "disabled" : ""}>自定义回答</button><button data-action="skipAnswer" data-question="${i}" ${locked ? "disabled" : ""}>${answers[q.id] === SKIPPED_ANSWER ? "已跳过 · 撤销" : "跳过此题"}</button></div><input type="${q.secret ? "password" : "text"}" data-answer="${i}" placeholder="填写回答" value="${E(answers[q.id] || "")}" ${locked ? "disabled" : ""} ${q.options.length && !((_a2 = s.customAnswers) == null ? void 0 : _a2.has(key + "|" + i)) ? "hidden" : ""}>`;
+    }).join("")}<p class="hint">${E(state.error || (!s.connected ? "电脑未连接" : state.state === "accepted" ? "已提交到电脑原对话" : state.state === "unknown" ? "送达待确认，核实状态不会重复发送" : "选择、填写回答，或跳过暂不回答的问题"))}</p>${state.state === "accepted" ? "" : `<div class="row questiontools">${state.state === "unknown" ? `<button class="primary" data-action="answerStatus" data-group="${E(g.id)}" ${state.sending || !s.connected ? "disabled" : ""}>核实提交状态</button>` : `<button data-action="skipAllAnswers" data-group="${E(g.id)}" ${locked || !s.connected ? "disabled" : ""}>跳过全部</button><button class="primary" data-action="answer" data-group="${E(g.id)}" ${locked || !s.connected || g.questions.some((q) => !(answers[q.id] || "").trim()) ? "disabled" : ""}>提交回答</button>`}</div>`}</div>`;
+  }).join("") + (s.awaitingApproval ? '<p class="hint">电脑权限审批需在桌面确认。</p>' : "");
+  el.oninput = (e) => {
+    var _a, _b, _c, _d;
+    const box = e.target.closest("[data-group]");
+    if (!box || !e.target.hasAttribute("data-answer")) return;
+    const g = s.questions.find((g2) => g2.id === box.dataset.group);
+    (_a = s.answers) != null ? _a : s.answers = {};
+    (_d = (_b = s.answers)[_c = g.id]) != null ? _d : _b[_c] = {};
+    s.answers[g.id][g.questions[+e.target.dataset.answer].id] = e.target.value;
+    const button = box.querySelector("[data-action=answer]");
+    if (button) button.disabled = !s.connected || g.questions.some((q) => !(s.answers[g.id][q.id] || "").trim());
+  };
+}
+async function submitQuestion(g, status = false) {
+  var _a;
+  const key = questionKey(g), state = questionRecord(g);
+  if (state.sending) return;
+  state.sending = true;
+  renderQuestions();
+  try {
+    s.qstates[key] = await call(status ? "questionStatus" : "questionSubmit", { threadId: s.thread.id, groupId: g.id, answers: ((_a = s.answers) == null ? void 0 : _a[g.id]) || {} });
+  } catch (e) {
+    s.qstates[key] = { ...state, state: "unknown", sending: false, error: e.message };
+  } finally {
+    renderQuestions();
+  }
+}
+function renderZeroTier() {
+  const z = s.zeroTier || s.boot.zeroTier || {};
+  header("ZeroTier", btn("servicesHome", "back", "返回服务"));
+  showPage(`<div class="card"><strong>手机内置网络</strong><p class="hint">无需安装其他 ZeroTier App。只为 AstroGate 的文件和网页提供网络连接。</p>${field("networkID", "网络 ID", z.networkID || "")}<button class="primary" data-action="toggleZeroTier" ${s.ztChanging ? "disabled" : ""}>${s.ztChanging ? "正在切换…" : z.enabled ? "关闭网络" : "启用网络"}</button></div><div class="card"><strong id="ztStatus">${E(z.status || "已关闭")}</strong><p>节点 ID：<span id="ztNode">${E(z.nodeID || "尚未生成")}</span> <button data-action="copyNode">复制</button></p><p>网络 IP：<span id="ztAddress">${E(z.address || "等待分配")}</span></p><p class="hint">首次加入私有网络，需要在你的 ZeroTier 管理后台授权上面的节点 ID。</p></div><button data-action="ztLicense">开源许可</button>`);
+  $("[name=networkID]").disabled = !!z.enabled || !!s.ztChanging;
+}
+async function updateZeroTier() {
+  if (s.tab !== "services" || s.route !== "zerotier") return;
+  s.zeroTier = await call("zeroTierState");
+  for (const [id, value] of [["ztStatus", s.zeroTier.status], ["ztNode", s.zeroTier.nodeID || "尚未生成"], ["ztAddress", s.zeroTier.address || "等待分配"]]) if ($("#" + id)) $("#" + id).textContent = value;
+}
+function hostServiceLink(href) {
+  try {
+    const u = new URL(href);
+    return /^https?:$/.test(u.protocol) && (/^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/.test(u.hostname) || /^10\./.test(u.hostname) || /^192\.168\./.test(u.hostname) || /^172\.(1[6-9]|2\d|3[01])\./.test(u.hostname));
+  } catch {
+    return false;
+  }
+}
+async function chooseDownload(params) {
+  const v = await modal("下载文件", "<p>选择传输通道。直连需要手机与电脑加入同一个 ZeroTier 网络。</p>", [["取消", false], ["服务器中转", "relay"], ["ZeroTier 直连", "direct"]]);
+  if (v) await call("download", { ...params, direct: v.__choice === "direct" });
+}
+async function hostWeb(address = "http://localhost:3000") {
+  var _a, _b;
+  const v = await modal("主机网页服务", `<label>已配对电脑</label><select name="device">${s.boot.devices.map((d) => {
+    var _a2;
+    return `<option value="${E(d.hostId)}" ${((_a2 = s.device) == null ? void 0 : _a2.hostId) === d.hostId ? "selected" : ""}>${E(deviceName(d))}</option>`;
+  }).join("")}</select>${field("url", "网页地址", address, "url")}${field("host", "主机 ZeroTier IP（直连使用）", s.hostIP || "")}<p class="hint">保留网页地址的端口和路径。中转访问所选电脑的本机服务；直连服务需要监听其 ZeroTier 网卡。</p>`, [["取消", false], ["服务器中转", "relay"], ["ZeroTier 直连", "direct"]]);
+  if (!v) return;
+  if (!v.device) throw Error("请先绑定电脑");
+  const u = new URL(v.url);
+  if (!/^https?:$/.test(u.protocol) || u.username || u.password) throw Error("请输入有效的 HTTP 或 HTTPS 地址");
+  if (((_a = s.device) == null ? void 0 : _a.hostId) !== v.device || !s.connected) await connect(v.device);
+  if (v.__choice === "direct" && !v.host) {
+    const n = await rpc("networkInfo");
+    v.host = ((_b = n.zeroTierAddresses) == null ? void 0 : _b[0]) || "";
+  }
+  if (v.__choice === "direct" && !v.host) throw Error("电脑未报告 ZeroTier IP，请手动填写");
+  s.hostIP = v.host;
+  await call("hostWeb", { url: v.url, direct: v.__choice === "direct", host: v.host });
+}
+async function modelPicker() {
+  var _a;
+  const r = await rpc("models", { threadId: s.thread.id });
+  const promise = modal("模型与推理", `<label>当前模型</label><select name="model">${r.models.map((m) => {
+    var _a2;
+    return `<option value="${E(m.id)}" ${m.id === ((_a2 = r.current) == null ? void 0 : _a2.model) ? "selected" : ""}>${E(m.name || m.id)}</option>`;
+  }).join("")}</select><label>推理强度</label><select name="effort"></select><p class="hint">仅列出模型支持的档位。运行期间切换会用于后续轮次。</p>`);
+  const update = () => {
+    const m = r.models.find((m2) => m2.id === $("#modal [name=model]").value);
+    $("#modal [name=effort]").innerHTML = ((m == null ? void 0 : m.efforts) || []).map((e) => {
+      var _a2;
+      return `<option value="${E(e.reasoningEffort)}" ${e.reasoningEffort === (((_a2 = r.current) == null ? void 0 : _a2.model) === m.id ? r.current.reasoningEffort : m.defaultEffort) ? "selected" : ""}>${E({ low: "低", medium: "中", high: "高", xhigh: "更高", max: "最高", ultra: "极高" }[e.reasoningEffort] || e.reasoningEffort)} · ${E(e.reasoningEffort)}</option>`;
+    }).join("") || '<option value="">模型默认</option>';
+  };
+  $("#modal [name=model]").onchange = update;
+  update();
+  const v = await promise;
+  if (v) {
+    const result = await rpc("setModel", { threadId: s.thread.id, model: v.model, ...v.effort ? { effort: v.effort } : {} });
+    s.model = ((_a = result.current) == null ? void 0 : _a.model) || v.model;
+    renderStatus();
+  }
+}
+let previewSequence = 0, previewGallery = [], previewIndex = 0;
+const originalImages = /* @__PURE__ */ new Map();
+async function previewImage(photo, photos = [photo], index = 0) {
+  var _a, _b;
+  previewGallery = photos;
+  previewIndex = index;
+  const token = ++previewSequence;
+  const frame = (content) => `<div class="imagewindow"><div class="row"><span class="grow ellipsis">${E(photo.name)}</span>${btn("closePreview", "close", "关闭图片")}</div>${content}${photos.length > 1 ? `<div class="row imagecontrols">${btn("previousImage", "back", "上一张", index === 0 ? "disabled" : "")}<small>${index + 1} / ${photos.length}</small><button data-action="nextImage" aria-label="下一张" ${index === photos.length - 1 ? "disabled" : ""}>›</button></div>` : ""}</div>`;
+  $("#preview").hidden = false;
+  $("#preview").innerHTML = frame("<p>正在读取原图…</p>");
+  const key = ((_a = s.device) == null ? void 0 : _a.hostId) + "|" + ((_b = s.thread) == null ? void 0 : _b.id) + "|" + photo.path;
+  if (!originalImages.has(key)) {
+    originalImages.set(key, (async () => {
+      const file = await call("download", { ...fileParams(photo.path), preview: true });
+      const src = await call("localImage", { path: file.path });
+      return { file, src };
+    })());
+    if (originalImages.size > 20) originalImages.delete(originalImages.keys().next().value);
+  }
+  try {
+    const { file, src } = await originalImages.get(key);
+    if (token === previewSequence && !$("#preview").hidden) $("#preview").innerHTML = frame(`<img src="${src}" alt="${E(photo.name)}"><button data-action="sharePreview" data-path="${E(file.path)}">分享原图</button>`);
+  } catch (e) {
+    originalImages.delete(key);
+    if (token === previewSequence) $("#preview").innerHTML = frame(`<p>${E(e.message)}</p>`);
+  }
+}
+setInterval(() => safe(updateZeroTier), 2e3);

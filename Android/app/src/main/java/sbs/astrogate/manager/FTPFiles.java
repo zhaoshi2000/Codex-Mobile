@@ -8,8 +8,14 @@ import org.json.*;
 final class FTPFiles implements AutoCloseable {
   private final FTPClient client = new FTPClient();
 
-  FTPFiles(JSONObject server) throws Exception {
+  FTPFiles(JSONObject server, EmbeddedZeroTier network) throws Exception {
     try {
+      if (server.optBoolean("useZeroTier")) {
+        client.setSocketFactory(network.factory(server.getString("host")));
+        client.setUseEPSVwithIPv4(true);
+        // Every control/data socket is forced to the configured ZeroTier host.
+        client.setRemoteVerificationEnabled(false);
+      }
       client.setConnectTimeout(15000);
       client.setDefaultTimeout(30000);
       client.setControlEncoding("UTF-8");

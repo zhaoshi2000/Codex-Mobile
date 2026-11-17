@@ -9,6 +9,7 @@
 3. 在连接页选择电脑，自动进入第一个 **Codex** 页，选择或新建对话。电脑与手机显示同一条原会话；电脑需要持续开机、联网。
 4. **服务 → 文件管理器** 管理本机文件；**服务 → ＋** 添加 SSH、SFTP、FTP 或 OpenClaw。SSH 首次连接先核对服务器指纹；SSH 类型直接打开终端。
 5. **设置**填写 HTTPS AI 接口地址和 API Key，自动获取模型，选择后保存。在 SSH 页面右上角打开 AI 助手；每个拟执行的服务器命令都需确认。
+6. **服务 → ZeroTier 内置网络** 填写网络 ID 并启用，在网络管理后台授权此手机节点；无需安装手机 ZeroTier App。FTP 配置可勾选内置网络。文件下载和 **主机网页服务** 可选择直连或服务器中转，详见[内置网络说明](../docs/embedded-network.md)。
 
 跨网络需要运行现有 `Connect` 中转服务。已有 iPhone 部署可以复用，不需要为 Android 另建服务。自建部署见 [Connect 文档](../Connect/README.md)。
 
@@ -20,8 +21,11 @@
 - Codex 剩余额度和重置时间（需使用 0.4.21 或更新的电脑连接包）；不显示 AI 中转站余额。
 - OpenClaw 支持自动查找用户目录安装，可配置独立运行用户；聊天页可直接使用 SSH 终端。
 - 原会话实时输出、历史合并与分页、运行状态、问题选项回答、等待消息队列、“引导”、停止、当前模型显示和切换。
+- 问题支持整行选项、自定义回答、跳过单题/全部；提交前持久化请求 ID，送达不明时只核实状态，避免重复发送。
+- 模型和推理强度使用展开选择器，只列出电脑报告支持的档位；代码块有独立复制按钮。
 - Markdown、表格、代码、PDF 等本地文件链接、复制回复、完成时间、回到底部。
 - 方形单行叠放缩略图、滑动切换、点按预览；图片位于文字气泡上方；滑动不触发打开或文件下载。
+- 原图使用轻虚化浮窗，多图有上一张/下一张按钮；重复打开复用下载结果，预览下载不弹保存提示、不触发聊天跳底。
 - 命令组默认仅显示最新摘要；展开按需读取，内部限定高度滚动。
 - 照片/文件附件上传；文件分块下载、进度、取消、SHA-256 校验、保存、分享和导出到系统下载目录。
 - 本机文件浏览、新建、文本编辑、重命名、删除、导入、系统打开/分享。
@@ -32,9 +36,10 @@
 
 ## 构建
 
-环境：JDK 17 或 21、Android SDK Platform 35、Build Tools 34+；`ANDROID_HOME` 指向 SDK。Gradle Wrapper 已包含。
+环境：JDK 17 或 21、Python 3、Android SDK Platform 35、Build Tools 34+、NDK 28.2.13676358、SDK CMake 3.22.1；`ANDROID_HOME` 指向 SDK。Gradle Wrapper 已包含。
 
 ```powershell
+python scripts/build-zerotier-android.py --sdk $env:ANDROID_HOME
 cd Android
 .\gradlew.bat :app:assembleDebug :app:lintDebug :app:testDebugUnitTest
 ```
@@ -55,11 +60,13 @@ npm test
 
 ## 实现和验证
 
-本地 WebView 仅渲染 APK 内置资源；网络、扫码、加密配对、文件操作、SSH 和 AI 调用均经原生 Java 层。页面不能导航到外部网页；外链在系统浏览器打开。Markdown 经 DOMPurify 清理，远程内容不能调用原生桥。
+本地 WebView 仅渲染 APK 内置资源；网络、扫码、加密配对、文件操作、SSH 和 AI 调用均经原生 Java 层。聊天 WebView 不能导航到外部网页；公共外链在系统浏览器打开，主机网页使用没有原生桥的独立 WebView。Markdown 经 DOMPurify 清理。主机网页支持用户指定的 HTTP 本地服务，AI 接口仍要求 HTTPS；HTTPS 网页不忽略证书错误。
 
 配对私钥、AI API Key 和 SSH 凭据存入 Android Keystore 保护的 AES-GCM 密文；密钥相互独立，系统备份与迁移不包含凭据。WebView 调试只在 debug 构建启用。
 
 验证包括 Node ↔ Java 加密兼容、重放/篡改拒绝、HTTPS 模型与 SSE 流、历史合并、附件解析，以及 Android 15 模拟器通过真实 WSS 中转进行配对、排队/引导、图片与 PDF 下载联调；独立 SSH/SFTP 测试服务验证指纹确认、终端和文件传输。测试服务使用合成内容，不访问用户会话。
+
+0.2.0 在独立私有网络通过实际 libzt 验证 FTP 读取/上传、512 KB 直连下载及 SHA-256 校验；主机网页的直连 HTTP、POST，以及 WSS 中转网页的 POST 和 WebSocket 回传均通过。网页代理的认证、目标主机/端口限制由 Java 单元测试覆盖；提问跳过与送达锁定、服务入口由浏览器回归检查覆盖。四种 ABI 均构建，原生库支持 16 KB 页面；运行验证使用 x86_64 Android 15 模拟器。
 
 Android 10 为编译和 API 兼容目标；仍需在对应真机验证系统扫码、相册、厂商后台管理和分享菜单。后台连接可能受系统省电限制，回到前台会重新同步；通知仅针对保持连接时收到的完成事件。OpenClaw 和实际 AI 提供商的端到端效果取决于用户服务器配置。
 
@@ -69,5 +76,6 @@ Android 10 为编译和 API 兼容目标；仍需在对应真机验证系统扫�
 - Bouncy Castle：MIT 类许可证；JSch (mwiede)：BSD-3-Clause。
 - Apache Commons Net：Apache-2.0；ZXing：Apache-2.0。
 - marked、xterm.js 与 fit addon：MIT；DOMPurify：Apache-2.0 或 MPL-2.0。
+- AndroidX WebKit：Apache-2.0。libzt 及固定子模块的完整许可见 App 内 **服务 → ZeroTier → 开源许可**。
 
 内置前端库对应许可证保存在 `app/src/main/assets/vendor/`。Gradle 下载的 Java 依赖及其元数据保留各自许可。esbuild 仅用于开发时构建，MIT。

@@ -6,7 +6,8 @@ const protocol=await fs.readFile(path.join(root,'../iFilePlus/Services/OpenClawP
 const launcher=protocol.match(/static let launcher = #"""\r?\n([\s\S]*?)\r?\n    """#/)[1].split(/\r?\n/).map(line=>line.replace(/^    /,'')).join('\n');
 await fs.writeFile(path.join(root,'app/src/main/assets/openclaw-launcher.sh'),launcher+'\n');
 for(const name of ['core','app']){
- const source=await fs.readFile(path.join(root,'web',name+'.js'),'utf8');
+ let source=await fs.readFile(path.join(root,'web',name+'.js'),'utf8');
+ if(name==='app')source+='\n'+await fs.readFile(path.join(root,'web/network.js'),'utf8');
  const {code}=await transform(source,{target:'chrome74',legalComments:'inline',charset:'utf8'});
  await fs.writeFile(path.join(root,'app/src/main/assets',name+'.js'),code);
 }
