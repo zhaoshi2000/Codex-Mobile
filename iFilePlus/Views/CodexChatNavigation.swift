@@ -153,7 +153,6 @@ struct CodexChatGroupView: View {
     let openImages: (String, [String]) -> Void
     let fork: (CodexChatMessage) -> Void
     @State private var copied = false
-    @State private var showingUsage = false
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(group.blocks) { block in
@@ -186,20 +185,11 @@ struct CodexChatGroupView: View {
                     Button { UIPasteboard.general.string = group.text; copied = true } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc").frame(width: 36, height: 40) }.accessibilityLabel("复制本轮回复")
                     ShareLink(item: group.text) { Image(systemName: "square.and.arrow.up").frame(width: 36, height: 40) }.accessibilityLabel("分享本轮回复")
                     if reply.turnID != nil { Button { fork(reply) } label: { Image(systemName: "arrow.triangle.branch").frame(width: 36, height: 40) }.accessibilityLabel("创建分支").disabled(forking || !service.connected) }
-                    Button { showingUsage = true } label: {
-                        Label(reply.tokenCount.map { "用量 " + $0.formatted(.number.notation(.compactName)) + " tok" } ?? "用量 —", systemImage: "cylinder")
-                            .font(.system(size: 11)).lineLimit(1).padding(.horizontal, 4).frame(minHeight: 40)
-                    }.accessibilityLabel("查看本轮用量")
                     if let completedAt = reply.completedAt, completedAt > 0 {
                         Text(Date(timeIntervalSince1970: completedAt / 1000), format: .dateTime.hour().minute())
                             .font(.system(size: 11)).monospacedDigit().padding(.leading, 4).accessibilityLabel("输出完成时间")
                     }
                 }.font(.system(size: 13)).buttonStyle(.plain).foregroundStyle(.secondary).padding(.top, 2)
-                    .alert("本轮用量", isPresented: $showingUsage) {
-                        Button("知道了", role: .cancel) { }
-                    } message: {
-                        Text(reply.tokenCount.map { "电脑记录的本轮用量：\($0) tokens。" } ?? "电脑尚未提供这轮回复的 token 用量。这里不使用字数估算，也不把整段对话累计用量当作本轮用量。")
-                    }
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
