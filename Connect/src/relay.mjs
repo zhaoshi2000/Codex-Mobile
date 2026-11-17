@@ -2,13 +2,13 @@ import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import { pathToFileURL } from "node:url";
 import { createRelayAdmin } from "./relay-admin.mjs";
-export function createRelay({ token, port = 8787, host = "127.0.0.1", adminPassword, configPath, publicWss }) {
+export function createRelay({ token, port = 8787, host = "127.0.0.1", adminUsername, adminPassword, configPath, publicWss }) {
   if (!token || token.length < 32)
     throw new Error("IFILE_RELAY_TOKEN 至少需要 32 个字符");
   const hosts = new Map(),
     peers = new Map(),
     rates = new Map();
-  const admin = createRelayAdmin({ legacyToken: token, adminPassword, configPath, publicWss });
+  const admin = createRelayAdmin({ legacyToken: token, adminUsername, adminPassword, configPath, publicWss });
   let next = 0;
   const server = http.createServer((req, res) => {
     if (req.url?.startsWith('/admin')) {
@@ -148,6 +148,7 @@ if (
     token: process.env.IFILE_RELAY_TOKEN,
     port: Number(process.env.PORT || 8787),
     host: process.env.BIND_HOST || "127.0.0.1",
+    adminUsername: process.env.IFILE_RELAY_ADMIN_USERNAME,
     adminPassword: process.env.IFILE_RELAY_ADMIN_PASSWORD,
     configPath: process.env.IFILE_RELAY_CONFIG_PATH,
     publicWss: process.env.IFILE_RELAY_PUBLIC_WSS,

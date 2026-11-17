@@ -63,8 +63,25 @@ test('admin requires separate login; new keys persist, can be revoked, and legac
 });
 
 test('admin rejects weak password and invalid public URL', () => {
-  assert.throws(() => createRelay({ token: legacy, adminPassword: 'short', configPath: '/tmp/admin.json' }), /20/);
+  assert.throws(() => createRelay({ token: legacy, adminPassword: 'short', configPath: '/tmp/admin.json' }), /8/);
+  assert.throws(() => createRelay({ token: legacy, adminUsername: 'bad:name', adminPassword: password, configPath: '/tmp/admin.json' }), /USERNAME/);
   assert.throws(() => createRelay({ token: legacy, adminPassword: password, configPath: '/tmp/admin.json', publicWss: 'ws://plain.example' }), /wss/);
+});
+
+test('configured nine-digit admin login replaces the default username', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'relay-admin-user-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const username = '876543210';
+  const nineDigitPassword = '123456789';
+  const relay = createRelay({ token: legacy, adminUsername: username, adminPassword: nineDigitPassword,
+    configPath: path.join(directory, 'admin.json'), publicWss: 'wss://relay.example/ifile-connect', port: 0 });
+  const port = await relay.start();
+  t.after(() => relay.close());
+  const url = `http://127.0.0.1:${port}/admin/api/state`;
+  const login = (user, pass) => ({ Authorization: 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64') });
+  assert.equal((await fetch(url, { headers: login('admin', nineDigitPassword) })).status, 401);
+  assert.equal((await fetch(url, { headers: login(username, password) })).status, 401);
+  assert.equal((await fetch(url, { headers: login(username, nineDigitPassword) })).status, 200);
 });
 
 test('repeated failed admin logins are throttled without affecting relay health', async (t) => {

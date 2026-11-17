@@ -25,8 +25,10 @@ const readBody = async (req) => {
   return JSON.parse(body || '{}');
 };
 
-export function createRelayAdmin({ legacyToken, adminPassword, configPath, publicWss = '' }) {
-  if (adminPassword && adminPassword.length < 20) throw new Error('IFILE_RELAY_ADMIN_PASSWORD 至少需要 20 个字符');
+export function createRelayAdmin({ legacyToken, adminUsername = 'admin', adminPassword, configPath, publicWss = '' }) {
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(adminUsername))
+    throw new Error('IFILE_RELAY_ADMIN_USERNAME 需为 1–64 位字母、数字、点、下划线或连字符');
+  if (adminPassword && adminPassword.length < 8) throw new Error('IFILE_RELAY_ADMIN_PASSWORD 至少需要 8 个字符');
   if (adminPassword && !configPath) throw new Error('管理后台需要 IFILE_RELAY_CONFIG_PATH 持久化目录');
   if (publicWss && !validWss(publicWss)) throw new Error('IFILE_RELAY_PUBLIC_WSS 必须是有效的 wss:// 地址');
   let state = { version: 1, publicWss, keys: [] };
@@ -62,7 +64,7 @@ export function createRelayAdmin({ legacyToken, adminPassword, configPath, publi
     try { credential = Buffer.from(header.slice(6), 'base64').toString('utf8'); }
     catch { return false; }
     const colon = credential.indexOf(':');
-    return colon > -1 && secureEqual(credential.slice(0, colon), 'admin') &&
+    return colon > -1 && secureEqual(credential.slice(0, colon), adminUsername) &&
       secureEqual(credential.slice(colon + 1), adminPassword);
   };
   const headers = (res) => {

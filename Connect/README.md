@@ -79,9 +79,9 @@ Windows 使用 `start.ps1 -Config 完整配置路径` 启动并显示桌面二�
 
 ## 中转部署
 
-Dockerfile 只包含 Node 中转代码。设置随机 32 字符以上的 `IFILE_RELAY_TOKEN` 作为兼容旧电脑的连接密钥；管理后台另设 `IFILE_RELAY_ADMIN_PASSWORD`，不得与连接密钥相同。容器端口 8787 只绑定服务器回环地址，前面用已有 HTTPS 反向代理。不要直接把未加 TLS 的中转端口开放到公网。
+Dockerfile 只包含 Node 中转代码。设置随机 32 字符以上的 `IFILE_RELAY_TOKEN` 作为兼容旧电脑的连接密钥；管理后台另设 `IFILE_RELAY_ADMIN_USERNAME` 和 `IFILE_RELAY_ADMIN_PASSWORD`，不得与连接密钥相同。容器端口 8787 只绑定服务器回环地址，前面用已有 HTTPS 反向代理。不要直接把未加 TLS 的中转端口开放到公网。
 
-管理后台使用同一 HTTPS 入口的 `/ifile-connect/admin/`。启动中转时设置 `IFILE_RELAY_ADMIN_PASSWORD`（至少 20 字符）、`IFILE_RELAY_CONFIG_PATH=/data/relay-admin.json` 和 `IFILE_RELAY_PUBLIC_WSS=wss://你的域名/ifile-connect`；将服务器上的持久目录挂载为容器 `/data`，并给容器用户写权限。浏览器使用用户名 `admin` 和单独的后台密码登录。后台可复制 WSS 地址、查看在线连接数、创建或停用电脑连接密钥。新密钥仅在创建时展示一次，配置文件只保存其 SHA-256 摘要；原 `IFILE_RELAY_TOKEN` 继续有效，旧电脑不用重新配对。停用密钥后，该电脑下一次连接会被拒绝，需在电脑端更新密钥。修改页面中的 WSS 地址只改变提供给电脑复制的地址；域名、证书和 Nginx 路由仍需在服务器配置。
+管理后台使用同一 HTTPS 入口的 `/ifile-connect/admin/`。启动中转时设置 `IFILE_RELAY_ADMIN_USERNAME`（默认 `admin`，允许 1–64 位字母、数字、点、下划线或连字符）、`IFILE_RELAY_ADMIN_PASSWORD`（至少 8 个字符）、`IFILE_RELAY_CONFIG_PATH=/data/relay-admin.json` 和 `IFILE_RELAY_PUBLIC_WSS=wss://你的域名/ifile-connect`；将服务器上的持久目录挂载为容器 `/data`，并给容器用户写权限。浏览器使用配置的用户名和单独的后台密码登录。修改用户名后，旧用户名立即失效；浏览器可能缓存旧的 Basic 登录信息，需重新登录。后台可复制 WSS 地址、查看在线连接数、创建或停用电脑连接密钥。新密钥仅在创建时展示一次，配置文件只保存其 SHA-256 摘要；原 `IFILE_RELAY_TOKEN` 继续有效，旧电脑不用重新配对。停用密钥后，该电脑下一次连接会被拒绝，需在电脑端更新密钥。修改页面中的 WSS 地址只改变提供给电脑复制的地址；域名、证书和 Nginx 路由仍需在服务器配置。
 
 若启用独立语音中转，给语音容器只读挂载同一 `/data/relay-admin.json` 并设置相同的 `IFILE_RELAY_CONFIG_PATH`，新密钥才能用于语音输入；停用新密钥对语音请求立即生效。后台密码、连接密钥和私有配置目录不得上传源码仓库。
 
