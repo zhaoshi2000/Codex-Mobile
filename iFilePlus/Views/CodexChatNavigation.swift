@@ -150,6 +150,7 @@ struct CodexChatGroupView: View {
     let group: CodexChatGroup
     let forking: Bool
     let openFile: (String) -> Void
+    let openImages: (String, [String]) -> Void
     let fork: (CodexChatMessage) -> Void
     @State private var copied = false
     @State private var showingUsage = false
@@ -160,7 +161,7 @@ struct CodexChatGroupView: View {
                 else if let message = block.items.first {
                     let images = CodexMessageImages(message.role == "user" ? message.text : "")
                     if !images.paths.isEmpty {
-                        HStack { Spacer(minLength: 0); CodexImageStack(service: service, threadID: threadID, paths: images.paths, open: openFile) }
+                        HStack { Spacer(minLength: 0); CodexImageStack(service: service, threadID: threadID, paths: images.paths, open: { openImages($0, images.paths) }) }
                     }
                     if message.role != "user" || !images.body.isEmpty {
                     HStack {
@@ -234,6 +235,9 @@ struct CodexChatBottomKey: PreferenceKey {
 }
 struct CodexPreviewFile: Identifiable {
     let url: URL
+    var imagePaths: [String] = []
+    var initialIndex = 0
+    var imageLoader: ((String) async throws -> URL)? = nil
     var id: String { url.path }
     var isImage: Bool { ["jpg", "jpeg", "png", "heic", "heif", "webp", "gif", "bmp", "tiff"].contains(url.pathExtension.lowercased()) }
 }
@@ -252,7 +256,7 @@ struct CodexChatPreviewModifier: ViewModifier {
             }
         }
         .fullScreenCover(item: photo, onDismiss: onDismiss) { file in
-            CodexImagePreview(url: file.url, close: { preview = nil }).presentationBackground(.clear)
+            CodexImagePreview(file: file, close: { preview = nil }).presentationBackground(.clear)
         }
     }
 }
@@ -299,10 +303,20 @@ struct CodexComposerButtonStyle: ButtonStyle {
 }
 
 struct CodexImagePreview: View {
-    let url: URL
+    let file: CodexPreviewFile
     let close: () -> Void
+    @State private var selected: Int
     @State private var image: UIImage?
-    @State private var failed = false
+    @State private var error: String?
+    @State private var loading = true
+    @State private var aspect: CGFloat = 1
+    @State private var retry = 0
+    private var paths: [String] { file.imagePaths.isEmpty ? [file.url.path] : file.imagePaths }
+    private var name: String { paths[selected].replacingOccurrences(of: "\\", with: "/").components(separatedBy: "/").last ?? file.url.lastPathComponent }
+    init(file: CodexPreviewFile, close: @escaping () -> Void) {
+        self.file = file; self.close = close
+        _selected = State(initialValue: min(max(0, file.initialIndex), max(0, file.imagePaths.count - 1)))
+    }
     var body: some View {
         GeometryReader { geometry in
             let width = min(geometry.size.width * 0.82, 560)
@@ -312,17 +326,35 @@ struct CodexImagePreview: View {
                 Color.black.opacity(0.10).ignoresSafeArea().contentShape(Rectangle()).onTapGesture(perform: close)
                 VStack(spacing: 10) {
                     HStack {
-                        Text(url.lastPathComponent).font(.caption).lineLimit(1).truncationMode(.middle)
+                        Text(name).font(.caption).lineLimit(1).truncationMode(.middle)
                         Spacer()
+                        if paths.count > 1 {
+                            Text("\(selected + 1) / \(paths.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                .accessibilityLabel("第 \(selected + 1) 张，共 \(paths.count) 张")
+                        }
                         Button(action: close) { Image(systemName: "xmark.circle.fill").font(.title2) }
                             .accessibilityLabel("关闭图片预览").frame(width: 44, height: 44)
                     }
-                    if let image {
-                        CodexZoomImage(image: image)
-                            .frame(height: min(height, width * image.size.height / max(1, image.size.width)))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    } else if failed { Text("图片无法读取，请重新打开。").font(.callout).padding() }
-                    else { ProgressView("正在读取图片…").frame(height: 100) }
+                    ZStack {
+                        if let image { CodexZoomImage(image: image) }
+                        else if let error {
+                            VStack(spacing: 10) {
+                                Text(error).font(.caption).lineLimit(3)
+                                Button("重新加载") { loading = true; retry += 1 }
+                            }.padding(.horizontal, paths.count > 1 ? 52 : 12)
+                        } else { ProgressView("正在读取图片…") }
+                    }
+                    .frame(height: min(height, max(100, width * aspect)))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay {
+                        if paths.count > 1 {
+                            HStack {
+                                pageButton(previous: true)
+                                Spacer()
+                                pageButton(previous: false)
+                            }.padding(.horizontal, 4)
+                        }
+                    }
                 }
                 .padding(12).frame(width: width + 24)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
@@ -330,16 +362,46 @@ struct CodexImagePreview: View {
                 .accessibilityAddTraits(.isModal)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .task(id: url) {
-            let file = url
-            let loaded = await Task.detached(priority: .userInitiated) {
-                guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
+        .task(id: "\(selected):\(retry)") {
+            loading = true; image = nil; error = nil
+            do {
+                let url: URL
+                if selected == file.initialIndex && retry == 0 { url = file.url }
+                else if let loader = file.imageLoader { url = try await loader(paths[selected]) }
+                else { url = URL(fileURLWithPath: paths[selected]) }
+                try Task.checkCancellation()
+                let loaded = await Task.detached(priority: .userInitiated) {
+                guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                       let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 2400, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else { return Optional<UIImage>.none }
                 return UIImage(cgImage: cg)
-            }.value
-            guard !Task.isCancelled else { return }
-            image = loaded; failed = loaded == nil
+                }.value
+                try Task.checkCancellation()
+                image = loaded
+                if let loaded { aspect = loaded.size.height / max(1, loaded.size.width) }
+                else { error = "图片无法读取，请重试。" }
+                loading = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.error = error.localizedDescription; loading = false
+            }
         }
+    }
+    private func pageButton(previous: Bool) -> some View {
+        let next = selected + (previous ? -1 : 1)
+        return Button {
+            guard !loading, paths.indices.contains(next) else { return }
+            loading = true; selected = next
+        } label: {
+            Image(systemName: previous ? "chevron.left" : "chevron.right")
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 34, height: 34)
+                .background(.regularMaterial, in: Circle())
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).foregroundStyle(.primary)
+        .disabled(loading || !paths.indices.contains(next))
+        .opacity(loading || !paths.indices.contains(next) ? 0.3 : 1)
+        .accessibilityLabel(previous ? "上一张图片" : "下一张图片")
     }
 }
 
@@ -383,40 +445,83 @@ struct CodexModelPicker: View {
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
     @State private var error: String?
+    @State private var expanded: String?
+    @State private var refreshing = false
+    private var modelTitle: String { service.models.first(where: { $0.id == service.currentModel })?.title ?? (service.currentModel.isEmpty ? "尚未读取" : service.currentModel) }
+    private var effectiveEffort: String { service.currentEffort.isEmpty ? (service.modelDefaultEfforts[service.currentModel] ?? "") : service.currentEffort }
+    private var efforts: [String] { service.modelEfforts[service.currentModel] ?? [] }
     var body: some View {
         NavigationStack {
             List {
-                Section { Text("当前：" + (service.currentModel.isEmpty ? "正在读取…" : service.currentModel)).font(.subheadline)
-                    Text("推理强度：" + (service.currentEffort.isEmpty ? "模型默认（" + (service.modelDefaultEfforts[service.currentModel] ?? "自动") + "）" : service.currentEffort)).font(.caption).foregroundStyle(.secondary)
-                    Text("使用电脑当前提供商的模型。任务运行期间切换，会用于后续轮次。").font(.footnote).foregroundStyle(.secondary)
-                }
-                if let efforts = service.modelEfforts[service.currentModel], !efforts.isEmpty {
-                    Section("推理强度") {
-                        ForEach(efforts, id: \.self) { effort in
-                            Button { Task {
-                                busy = true; error = nil; defer { busy = false }
-                                do { try await service.chooseModel(service.currentModel, threadID: threadID, effort: effort) }
-                                catch { self.error = error.localizedDescription }
-                            } } label: {
-                                HStack { Text(effortTitle(effort)); Spacer()
-                                    if effort == (service.currentEffort.isEmpty ? service.modelDefaultEfforts[service.currentModel] : service.currentEffort) { Image(systemName: "checkmark") }
-                                }
-                            }.disabled(busy)
+                Section {
+                    DisclosureGroup(isExpanded: expansion("model")) {
+                        ForEach(service.models) { model in
+                            Button { choose(model.id) } label: {
+                                option(model.title, selected: service.currentModel == model.id)
+                            }.disabled(busy || refreshing || !service.connected)
                         }
-                    }
+                        if service.models.isEmpty { Text("暂无可选模型，请刷新后重试。").font(.caption).foregroundStyle(.secondary) }
+                    } label: { selectionLabel("当前模型", value: modelTitle, icon: "sparkles") }
                 }
-                ForEach(service.models) { model in
-                    Button { Task { busy = true; defer { busy = false }; do { try await service.chooseModel(model.id, threadID: threadID); dismiss() } catch { self.error = error.localizedDescription } } } label: {
-                        HStack { Text(model.title); Spacer(); if service.currentModel == model.id { Image(systemName: "checkmark") } }
-                    }.disabled(busy)
+                Section {
+                    DisclosureGroup(isExpanded: expansion("effort")) {
+                        ForEach(efforts, id: \.self) { effort in
+                            Button { choose(service.currentModel, effort: effort) } label: {
+                                option(effortTitle(effort), selected: effort == effectiveEffort)
+                            }.disabled(busy || refreshing || !service.connected)
+                        }
+                        if efforts.isEmpty { Text("当前模型未提供可调整的推理强度。").font(.caption).foregroundStyle(.secondary) }
+                    } label: { selectionLabel("推理强度", value: effectiveEffort.isEmpty ? "模型默认" : effortTitle(effectiveEffort), icon: "slider.horizontal.3") }
+                } footer: {
+                    Text(service.running ? "当前任务继续运行，新选择将在下一轮生效。" : "选择后自动同步到电脑，下一条消息将使用新设置。")
                 }
-                if busy { ProgressView("正在切换…") }
-                if service.models.isEmpty && !busy { Button("重新读取模型") { Task { await service.refreshModels(threadID) } } }
-                if let error { Text(error).foregroundStyle(.red) }
-            }.navigationTitle("选择模型").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() }.disabled(busy) } }
-               .task { await service.refreshModels(threadID) }
+                if busy || refreshing {
+                    HStack(spacing: 10) { ProgressView(); Text(busy ? "正在同步…" : "正在读取…").font(.footnote).foregroundStyle(.secondary) }
+                        .listRowBackground(Color.clear)
+                }
+                if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            }.listStyle(.insetGrouped).navigationTitle("模型与推理").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() }.disabled(busy) }
+                    ToolbarItem(placement: .topBarTrailing) { Button { Task { await refresh() } } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("刷新可用模型").disabled(busy || refreshing || !service.connected) }
+                }
+                .task { await refresh() }
         }
+    }
+    private func expansion(_ key: String) -> Binding<Bool> {
+        Binding(get: { expanded == key }, set: { value in
+            guard !busy else { return }
+            withAnimation(.easeInOut(duration: 0.2)) { expanded = value ? key : nil }
+        })
+    }
+    private func selectionLabel(_ title: String, value: String, icon: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).font(.system(size: 18)).foregroundStyle(.secondary)
+                .frame(width: 36, height: 36).background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).font(.caption).foregroundStyle(.secondary)
+                Text(value).font(.system(size: 16, weight: .medium)).foregroundStyle(.primary).lineLimit(1)
+            }
+        }.padding(.vertical, 7)
+    }
+    private func option(_ title: String, selected: Bool) -> some View {
+        HStack { Text(title).foregroundStyle(.primary); Spacer(); if selected { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) } }
+            .font(.subheadline).padding(.vertical, 7).contentShape(Rectangle())
+            .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+    private func choose(_ model: String, effort: String? = nil) {
+        busy = true; error = nil
+        Task {
+            defer { busy = false }
+            do {
+                try await service.chooseModel(model, threadID: threadID, effort: effort)
+                withAnimation(.easeInOut(duration: 0.2)) { expanded = nil }
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+    private func refresh() async {
+        refreshing = true; defer { refreshing = false }
+        await service.refreshModels(threadID)
     }
     private func effortTitle(_ value: String) -> String {
         let names = ["none": "不推理", "minimal": "最少", "low": "低", "medium": "中", "high": "高", "xhigh": "更高", "max": "最高", "ultra": "极高"]

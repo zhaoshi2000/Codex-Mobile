@@ -420,7 +420,7 @@ private struct CodexChatContent: View {
                             if browsingOlder { Text("正在查看较早记录").foregroundStyle(.secondary) }
                         }.font(.caption)
                         ForEach(CodexChatTimeline.groups(service.messages)) { group in
-                            CodexChatGroupView(service: service, threadID: thread.id, group: group, forking: forking, openFile: openPCFile, fork: { forkMessage = $0 })
+                            CodexChatGroupView(service: service, threadID: thread.id, group: group, forking: forking, openFile: openPCFile, openImages: openImages, fork: { forkMessage = $0 })
                         }
                         if !browsingOlder {
                             ForEach(service.questions) { group in CodexQuestionCard(group: group, service: service, threadID: thread.id) }
@@ -474,12 +474,16 @@ private struct CodexChatContent: View {
             if !attachments.isEmpty {
                 ScrollView(.horizontal) { HStack { ForEach(attachments, id: \.self) { url in
                     HStack(spacing: 8) {
-                        Button { preview = CodexPreviewFile(url: url) } label: { Label(url.lastPathComponent, systemImage: "paperclip").font(.caption).lineLimit(1) }.accessibilityLabel("预览 " + url.lastPathComponent)
+                        Button {
+                            scrollState.pause(); bottomScrollTask?.cancel()
+                            let images = attachments.filter { CodexPreviewFile(url: $0).isImage }
+                            preview = CodexPreviewFile(url: url, imagePaths: images.map(\.path), initialIndex: images.firstIndex(of: url) ?? 0)
+                        } label: { Label(url.lastPathComponent, systemImage: "paperclip").font(.caption).lineLimit(1) }.accessibilityLabel("预览 " + url.lastPathComponent)
                         Button { attachments.removeAll { $0 == url }; try? FileManager.default.removeItem(at: url) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.accessibilityLabel("移除附件").disabled(sending || uncertain)
                     }.padding(8).background(.secondary.opacity(0.12), in: Capsule())
                 } }.padding(.horizontal) }
             }
-            if voiceMode || voice.error != nil { CodexVoicePreview(voice: voice, preferLocal: $preferLocalVoice) }
+            if voice.active || voice.error != nil { CodexVoicePreview(voice: voice) }
             CodexComposerShell {
                 Button {
                     voice.cancel()
@@ -645,14 +649,18 @@ private struct CodexChatContent: View {
         scrollState.pause()
     }
     private func openPCFile(_ path: String) {
+        openImages(path, [path])
+    }
+    private func openImages(_ path: String, _ paths: [String]) {
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
-        if ["jpg", "jpeg", "png", "heic", "gif", "webp", "pdf"].contains(ext) {
+        if ["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "bmp", "tif", "tiff", "pdf"].contains(ext) {
             guard !previewLoading else { return }
             scrollState.pause(); bottomScrollTask?.cancel(); previewLoading = true
             Task { defer { previewLoading = false }; do {
                 let file = try await service.previewFile(path, threadID: thread.id)
                 guard service.selectedThread == thread.id else { return }
-                preview = CodexPreviewFile(url: file)
+                preview = CodexPreviewFile(url: file, imagePaths: paths, initialIndex: paths.firstIndex(of: path) ?? 0,
+                    imageLoader: { try await service.previewFile($0, threadID: thread.id) })
             } catch { service.error = error.localizedDescription } }
         } else { pendingDownload = path }
     }

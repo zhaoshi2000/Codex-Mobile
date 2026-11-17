@@ -250,7 +250,6 @@ private final class CodexVoicePCM: @unchecked Sendable {
 
 struct CodexVoicePreview: View {
     @ObservedObject var voice: CodexVoiceRecorder
-    @Binding var preferLocal: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if voice.active {
@@ -271,15 +270,7 @@ struct CodexVoicePreview: View {
                     }
                 }.padding(12).background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
             }
-            HStack {
-                Menu {
-                    Button { preferLocal = true } label: { Label("手机本地（中文）", systemImage: preferLocal ? "checkmark" : "iphone") }
-                    Button { preferLocal = false } label: { Label("服务器 CPU", systemImage: preferLocal ? "desktopcomputer" : "checkmark") }
-                } label: { Label(preferLocal ? "手机本地识别" : "服务器 CPU 识别", systemImage: preferLocal ? "iphone" : "desktopcomputer") }
-                .disabled(voice.active)
-                Spacer()
-                if voice.finishing { ProgressView(); Button("取消") { voice.cancel() } }
-            }.font(.caption)
+            if voice.finishing { HStack { Spacer(); ProgressView(); Button("取消") { voice.cancel() } }.font(.caption) }
             if let error = voice.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
         }.padding(.horizontal)
     }
