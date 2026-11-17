@@ -9,6 +9,17 @@ $pidFile = Join-Path $statePath 'bridge.pid'
 $bridgeFile = Join-Path $PSScriptRoot 'src\bridge.mjs'
 $bundledNode = Join-Path $PSScriptRoot 'Runtime\node.exe'
 $nodePath = if (Test-Path -LiteralPath $bundledNode) { $bundledNode } else { (Get-Command node -ErrorAction Stop).Source }
+function Get-BridgeStartupError {
+    param([string]$ErrorLog)
+    $detail = Get-Content -LiteralPath $ErrorLog -Raw -ErrorAction SilentlyContinue
+    if ($detail -match '\bEPERM\b' -or $detail -match '\bEACCES\b') {
+        return "Windows 拒绝启动 Codex 命令程序（权限错误）。Codex 桌面版即使已打开，也可能因配置的 codex.exe 无执行权限而失败。请检查或重新选择可运行的 Codex 命令程序。详细日志：$ErrorLog"
+    }
+    if ($detail -match '\bENOENT\b' -or $detail -match '\bnot found\b') {
+        return "找不到 Codex 命令程序或其依赖文件。请检查 Codex 安装路径。详细日志：$ErrorLog"
+    }
+    return "连接进程异常退出。请查看详细日志：$ErrorLog"
+}
 if (Test-Path -LiteralPath $pidFile) {
     $savedPid = [int](Get-Content -LiteralPath $pidFile -Raw)
     $old = Get-CimInstance Win32_Process -Filter "ProcessId=$savedPid"
@@ -48,15 +59,16 @@ $credentialFile = Join-Path $statePath 'relay.token'
 $env:IFILE_RELAY_TOKEN = (Get-Content -LiteralPath $credentialFile -Raw -Encoding UTF8).Trim()
 try {
     $ready = $false
-    $process = Start-Process -FilePath $nodePath -ArgumentList @(('"' + $bridgeFile + '"'), ('"' + $configPath + '"')) -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $statePath 'bridge.log') -RedirectStandardError (Join-Path $statePath 'bridge-error.log') -PassThru
+    $errorLog = Join-Path $statePath 'bridge-error.log'
+    $process = Start-Process -FilePath $nodePath -ArgumentList @(('"' + $bridgeFile + '"'), ('"' + $configPath + '"')) -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $statePath 'bridge.log') -RedirectStandardError $errorLog -PassThru
     Set-Content -LiteralPath $pidFile -Value $process.Id -Encoding ASCII
     for ($n = 0; $n -lt 30; $n++) {
         Start-Sleep -Milliseconds 500
         $process.Refresh()
-        if ($process.HasExited) { throw "Bridge failed. See $statePath\bridge-error.log" }
+        if ($process.HasExited) { throw (Get-BridgeStartupError -ErrorLog $errorLog) }
         if ((Get-Content -LiteralPath (Join-Path $statePath 'bridge.log') -Raw -ErrorAction SilentlyContinue) -match 'pairing.png') { $ready = $true; break }
     }
-    if (!$ready) { throw "Pairing was not ready within 15 seconds. See $statePath\bridge-error.log" }
+    if (!$ready) { throw "配对码在 15 秒内未生成。请检查中转网络、Codex 命令程序和日志：$errorLog" }
     Write-Output "Pairing QR (valid for 2 minutes): $statePath\pairing.png"
 } finally { Remove-Item Env:IFILE_RELAY_TOKEN -ErrorAction SilentlyContinue }
 if (!$NoShowQR) {

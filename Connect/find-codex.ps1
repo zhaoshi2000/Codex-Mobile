@@ -1,8 +1,26 @@
 # Dot-source from Windows PowerShell 5.1 or newer. Never embeds a machine-specific path.
+function Test-CodexExecutable {
+    param([string]$Candidate)
+    if (!$Candidate -or !(Test-Path -LiteralPath $Candidate -PathType Leaf)) { return $false }
+    try {
+        $version = & $Candidate --version 2>$null
+        if ($LASTEXITCODE -ne 0) { return $false }
+        return (($version -join ' ') -match '^codex-cli\s+\S+')
+    } catch { return $false }
+}
+
 function Find-CodexExecutable {
     param([string]$Preferred)
-    if ($Preferred -and (Test-Path -LiteralPath $Preferred -PathType Leaf)) { return $Preferred }
     $candidates = @()
+    if ($Preferred) { $candidates += $Preferred }
+    # The desktop may run a user-writable native CLI even when the packaged
+    # WindowsApps copy is visible but cannot be executed by this account.
+    $desktopBin = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
+    if (Test-Path -LiteralPath $desktopBin -PathType Container) {
+        foreach ($directory in @(Get-ChildItem -LiteralPath $desktopBin -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
+            $candidates += Join-Path $directory.FullName 'codex.exe'
+        }
+    }
     if (Get-Command Get-AppxPackage -ErrorAction SilentlyContinue) {
         $packages = @(Get-AppxPackage -Name OpenAI.Codex -ErrorAction SilentlyContinue | Sort-Object Version -Descending)
         foreach ($package in $packages) {
@@ -19,13 +37,50 @@ function Find-CodexExecutable {
             $candidates += Join-Path $base $relative
         }
     }
+    $npmRoot = Join-Path $env:APPDATA 'npm\node_modules\@openai'
+    foreach ($target in @('x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc')) {
+        foreach ($package in @('codex-win32-x64', 'codex-win32-arm64')) {
+            $candidates += Join-Path $npmRoot "codex\node_modules\@openai\$package\vendor\$target\bin\codex.exe"
+            $candidates += Join-Path $npmRoot "$package\vendor\$target\bin\codex.exe"
+        }
+        $candidates += Join-Path $npmRoot "codex\vendor\$target\codex\codex.exe"
+    }
     foreach ($candidate in $candidates) {
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        if (Test-CodexExecutable -Candidate $candidate) { return $candidate }
     }
     # PATH may contain a CLI installation; the desktop application must still be running.
     $command = Get-Command codex.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($command) { return $command.Source }
+    if ($command -and (Test-CodexExecutable -Candidate $command.Source)) { return $command.Source }
     return $null
+}
+
+function Start-CodexDesktop {
+    param([string]$CodexCli, [switch]$Hidden)
+    if (Get-Command Get-AppxPackage -ErrorAction SilentlyContinue) {
+        $packages = @(Get-AppxPackage -Name OpenAI.Codex -ErrorAction SilentlyContinue | Sort-Object Version -Descending)
+        foreach ($package in $packages) {
+            try {
+                $manifest = Get-AppxPackageManifest -Package $package.PackageFullName -ErrorAction Stop
+                $app = @($manifest.Package.Applications.Application) |
+                    Where-Object { $_.Executable -match '(ChatGPT|Codex)\.exe$' } |
+                    Select-Object -First 1
+                if (!$app) { continue }
+                $activation = 'shell:AppsFolder\' + $package.PackageFamilyName + '!' + $app.Id
+                if ($Hidden) { Start-Process -FilePath explorer.exe -ArgumentList $activation -WindowStyle Hidden }
+                else { Start-Process -FilePath explorer.exe -ArgumentList $activation -WindowStyle Normal }
+                return $true
+            } catch { continue }
+        }
+    }
+    if ($CodexCli -and $CodexCli -match '\\resources\\codex\.exe$') {
+        $desktop = Join-Path (Split-Path (Split-Path $CodexCli -Parent) -Parent) 'Codex.exe'
+        if (Test-Path -LiteralPath $desktop -PathType Leaf) {
+            if ($Hidden) { Start-Process -FilePath $desktop -WindowStyle Hidden }
+            else { Start-Process -FilePath $desktop -WindowStyle Normal }
+            return $true
+        }
+    }
+    return $false
 }
 
 function Repair-CodexExecutable {

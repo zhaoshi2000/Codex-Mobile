@@ -10,13 +10,8 @@ try {
         try {
             $settings = Get-Content -LiteralPath $Config -Raw -Encoding UTF8 | ConvertFrom-Json
             $cli = Find-CodexExecutable -Preferred $settings.codexExecutable
-            if ($cli) {
-                $desktop = Join-Path (Split-Path (Split-Path $cli -Parent) -Parent) 'Codex.exe'
-                $running = Get-CimInstance Win32_Process -Filter "Name='Codex.exe'" | Where-Object { $_.ExecutablePath -eq $desktop }
-                if (!$running -and (Test-Path -LiteralPath $desktop)) {
-                    Start-Process -FilePath $desktop -WindowStyle Hidden
-                    Start-Sleep -Seconds 10
-                }
+            if (!(Test-Path -LiteralPath '\\.\pipe\codex-ipc')) {
+                if (Start-CodexDesktop -CodexCli $cli -Hidden) { Start-Sleep -Seconds 10 }
             }
             & (Join-Path $PSScriptRoot 'start.ps1') -Config $Config -NoShowQR -EnsureRunning | Out-Null
         } catch {

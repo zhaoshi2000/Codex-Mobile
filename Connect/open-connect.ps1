@@ -22,11 +22,8 @@ function Wait-CodexDesktop {
     param([string]$Cli)
     $pipe = '\\.\pipe\codex-ipc'
     if (Test-Path -LiteralPath $pipe) { return }
-    $desktop = Join-Path (Split-Path (Split-Path $Cli -Parent) -Parent) 'Codex.exe'
-    if (Test-Path -LiteralPath $desktop -PathType Leaf) {
-        Start-Process -FilePath $desktop -WindowStyle Normal
-    } else {
-        throw '找不到 Codex 桌面版。请先安装并登录 Codex，然后重新打开连接程序。'
+    if (!(Start-CodexDesktop -CodexCli $Cli)) {
+        throw '找不到 Codex 桌面版。请先打开并登录 Codex，然后重新打开连接程序。'
     }
     for ($n = 0; $n -lt 60; $n++) {
         if (Test-Path -LiteralPath $pipe) { return }
@@ -64,7 +61,7 @@ try {
     & (Join-Path $PSScriptRoot 'start.ps1') -Config $configPath
     & (Join-Path $PSScriptRoot 'install-autostart.ps1') -Config $configPath | Out-Null
 } catch {
-    $message = "连接程序启动失败。请确认 Codex 桌面版已打开并完成登录。`n`n" + $_.Exception.Message
+    $message = "连接程序启动失败。`n`n" + $_.Exception.Message
     [void][Windows.Forms.MessageBox]::Show($message, 'AstroGate Connect')
     exit 2
 } finally {
