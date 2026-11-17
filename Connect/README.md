@@ -54,6 +54,8 @@
 
 Windows 安装包内置官方 Node x64 运行时和依赖，能识别商店版及常见独立版 Codex。Codex 更新后如原路径失效，会重新查找可执行文件，保留电脑身份与配对。二维码仅保存在用户状态目录。构建公开包：`python Connect/package-windows.py --runtime <含 node.exe 和 LICENSE 的目录> --version 0.4.32`；私有免配置包另外传入 `--setup-token-file Build/Private/setup/relay.token`。私有包只存放在本地 `Build/Releases`，不得上传公开仓库或分享；公开包没有连接密钥。
 
+私有单文件安装包 `AstroGate-Connect-0.4.32-Private-Windows-x64-Setup.exe` 可直接双击运行，无需先解压。若使用 ZIP，必须先在资源管理器中选择“全部解压”；直接从压缩包预览打开安装 CMD 时，Windows 可能只临时提取 CMD，缺少其余安装文件。
+
 Windows x64 ZIP 完整解压后，双击 `安装 AstroGate Connect.cmd`。它安装到当前用户 `%LOCALAPPDATA%\Programs\AstroGate Connect`，创建桌面和开始菜单快捷方式，然后启动配对窗口；后续双击 `AstroGate Connect` 快捷方式即可刷新二维码。默认中转地址为 `wss://1.14.93.149/ifile-connect`。私有包首次启动自动导入随包提供的专用连接密钥，用户不必输入服务器地址或密钥；公开包首次需从中转后台取得专用连接密钥。密钥和配对状态保存在当前 Windows 用户目录 `~/.ifileplus-connect`，安装更新不会覆盖。不要把一台电脑的状态目录复制到另一台。
 
 中转管理员可在 HTTPS 管理页创建电脑连接密钥。后台登录密码与连接密钥不同；新密钥只在创建时显示一次，后续可撤销。私有安装包的 `setup/relay.token` 是连接密钥，生成后需妥善保管；打包脚本不会把它放进公开包或源码。撤销密钥后，使用该密钥的电脑需要导入新密钥。
