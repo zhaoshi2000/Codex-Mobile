@@ -415,12 +415,14 @@ function renderComposer() {
   const el = $("#composer");
   el.hidden = false;
   const focus = $("#draft") === document.activeElement, selection = (_a = $("#draft")) == null ? void 0 : _a.selectionStart;
-  el.innerHTML = `<div id="downloadBox"></div><div class="attachments">${s.attachments.map((a, i) => `<span class="pill">${E(a.name)}<button data-action="removeAttachment" data-index="${i}" aria-label="移除附件">×</button></span>`).join("")}</div><div id="queueBox">${s.queue.map((q) => `<div class="queued row"><div class="grow"><div class="ellipsis">${E(q.displayText || q.text || "附件消息")}</div><small>${E(q.error || "等待当前任务完成")}</small></div><button data-action="steer" data-id="${E(q.id)}" ${q.editable === false ? "disabled" : ""}>↪ 引导</button><button data-action="removeQueued" data-id="${E(q.id)}" aria-label="删除等待消息">×</button></div>`).join("")}</div><div class="row">${btn("attach", "plus", "添加附件", 'class="attach"')}<textarea class="grow" id="draft" rows="1" maxlength="32000" placeholder="发消息…">${E(s.draft)}</textarea>${btn("effort", "effort", "调整思考强度", !s.connected || !s.writable ? "disabled" : "")}${s.busy ? btn("stop", "stop", "停止任务") : ""}<button class="primary send" data-action="send" aria-label="发送消息" ${s.uploading || (effortPanel == null ? void 0 : effortPanel.busy) || !s.connected ? "disabled" : ""}>${icon("send")}</button></div>`;
+  el.innerHTML = `<div id="downloadBox"></div><div class="attachments">${s.attachments.map((a, i) => `<span class="pill">${E(a.name)}<button data-action="removeAttachment" data-index="${i}" aria-label="移除附件">×</button></span>`).join("")}</div><div id="queueBox">${s.queue.map((q) => `<div class="queued row"><div class="grow"><div class="ellipsis">${E(q.displayText || q.text || "附件消息")}</div><small>${E(q.error || "等待当前任务完成")}</small></div><button data-action="steer" data-id="${E(q.id)}" ${q.editable === false ? "disabled" : ""}>↪ 引导</button><button data-action="removeQueued" data-id="${E(q.id)}" aria-label="删除等待消息">×</button></div>`).join("")}</div><div class="composerbox"><textarea id="draft" rows="1" maxlength="32000" placeholder="发消息…" aria-label="消息">${E(s.draft)}</textarea><div class="row composerActions">${btn("attach", "plus", "添加附件", 'class="attach"')}<span class="grow"></span>${btn("effort", "effort", "调整思考强度", !s.connected || !s.writable ? "disabled" : "")}${s.busy ? btn("stop", "stop", "停止任务") : ""}<button class="primary send" data-action="send" aria-label="发送消息" ${s.uploading || (effortPanel == null ? void 0 : effortPanel.busy) || !s.connected ? "disabled" : ""}>${icon("send")}</button></div></div>`;
   $("#draft").oninput = (e) => {
     s.draft = e.target.value;
     e.target.style.height = "auto";
     e.target.style.height = Math.min(120, e.target.scrollHeight) + "px";
+    positionEffort();
   };
+  $("#draft").style.height = Math.min(120, $("#draft").scrollHeight) + "px";
   if (focus) {
     $("#draft").focus();
     $("#draft").setSelectionRange(selection, selection);

@@ -302,7 +302,7 @@ struct CodexLightBlur: UIViewRepresentable {
 struct CodexComposerShell<Content: View>: View {
     @ViewBuilder let content: Content
     var body: some View {
-        HStack(alignment: .bottom, spacing: 2) { content }
+        VStack(alignment: .leading, spacing: 4) { content }
             .padding(6)
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 26))
             .overlay { RoundedRectangle(cornerRadius: 26).strokeBorder(.primary.opacity(0.07), lineWidth: 0.5) }

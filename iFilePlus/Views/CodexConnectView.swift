@@ -403,6 +403,80 @@ private struct CodexChatContent: View {
     @State private var uploadedIDs: [String] = []
     @State private var pendingDownload: String?
     @Environment(\.openURL) private var openURL
+    private var messageComposer: some View {
+        CodexComposerShell {
+            if !voiceMode {
+                TextField("", text: $draft, prompt: Text("发消息…").foregroundColor(Color(uiColor: .secondaryLabel)), axis: .vertical)
+                    .font(.system(size: 17)).lineLimit(1...5).textFieldStyle(.plain)
+                    .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                    .padding(.horizontal, 10).padding(.top, 6)
+                    .focused($composerFocused).disabled(sending || uncertain)
+            }
+            HStack(spacing: 2) {
+                Menu {
+                    Button("选择文件", systemImage: "doc") { importing = true }
+                    Button("选择照片", systemImage: "photo") { choosingPhoto = true }
+                } label: { Image(systemName: "plus").font(.system(size: 23, weight: .regular)).frame(width: 44, height: 44) }
+                    .buttonStyle(.plain).foregroundStyle(.primary)
+                    .accessibilityLabel("添加照片或文件")
+                    .disabled(sending || uncertain || loadingPhoto || attachments.count >= 6 || voice.active)
+                if voiceMode {
+                    CodexHoldToTalk(voice: voice, service: service, preferLocal: preferLocalVoice,
+                                    disabled: sending || uncertain || (!preferLocalVoice && !service.connected)) { value in
+                        draft += (draft.isEmpty || draft.hasSuffix("\n") ? "" : "\n") + value
+                        voiceMode = false
+                        composerFocused = true
+                    }
+                    Button { toggleVoiceInput() } label: { Image(systemName: "keyboard") }
+                        .buttonStyle(CodexComposerButtonStyle()).accessibilityLabel("切换键盘输入")
+                        .disabled(sending || uncertain)
+                    if service.running {
+                        Button { Task { await service.stop(thread.id) } } label: { Image(systemName: "stop.fill").font(.system(size: 15)) }
+                            .buttonStyle(CodexComposerButtonStyle()).accessibilityLabel("停止任务")
+                    }
+                } else {
+                    Spacer(minLength: 8)
+                    Button {
+                        scrollState.pause(); bottomScrollTask?.cancel()
+                        effortOpen.toggle()
+                    } label: { Image(systemName: "gauge.with.dots.needle.50percent") }
+                        .buttonStyle(CodexComposerButtonStyle())
+                        .accessibilityLabel("思考强度，" + CodexEffortPicker.title(service.currentEffort.isEmpty ? (service.modelDefaultEfforts[service.currentModel] ?? "") : service.currentEffort))
+                        .disabled(!service.connected || !service.writable || sending || uncertain || effortBusy)
+                    if hasComposerContent || service.running {
+                        Button { toggleVoiceInput() } label: { Image(systemName: "mic") }
+                            .buttonStyle(CodexComposerButtonStyle()).accessibilityLabel("切换按住说话")
+                            .disabled(sending || uncertain)
+                    }
+                    if service.running && hasComposerContent {
+                        Button { Task { await service.stop(thread.id) } } label: { Image(systemName: "stop.fill").font(.system(size: 15)) }
+                            .buttonStyle(CodexComposerButtonStyle()).accessibilityLabel("停止任务")
+                    }
+                    if !hasComposerContent && !sending && !uncertain {
+                        Button {
+                            if service.running { Task { await service.stop(thread.id) } }
+                            else { toggleVoiceInput() }
+                        } label: { Image(systemName: service.running ? "stop.fill" : "waveform") }
+                            .buttonStyle(CodexComposerButtonStyle(primary: true))
+                            .accessibilityLabel(service.running ? "停止任务" : "切换按住说话")
+                    } else {
+                        Button { Task { await send() } } label: { if sending { ProgressView() } else { Image(systemName: uncertain ? "arrow.clockwise" : "arrow.up") } }
+                            .buttonStyle(CodexComposerButtonStyle(primary: true)).accessibilityLabel(uncertain ? "重试发送" : "发送消息")
+                            .disabled(sending || effortBusy || loadingPhoto || !service.connected || !service.writable || !hasComposerContent || browsingOlder)
+                    }
+                }
+            }
+        }
+    }
+    private var hasComposerContent: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty || !uploadedIDs.isEmpty
+    }
+    private func toggleVoiceInput() {
+        effortOpen = false
+        voice.cancel()
+        voiceMode.toggle()
+        composerFocused = !voiceMode
+    }
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
@@ -496,48 +570,7 @@ private struct CodexChatContent: View {
                 } }.padding(.horizontal) }
             }
             if voice.active || voice.error != nil { CodexVoicePreview(voice: voice) }
-            CodexComposerShell {
-                Button {
-                    voice.cancel()
-                    voiceMode.toggle()
-                    composerFocused = !voiceMode
-                } label: { Image(systemName: voiceMode ? "keyboard" : "waveform") }
-                    .buttonStyle(CodexComposerButtonStyle())
-                    .accessibilityLabel(voiceMode ? "切换键盘输入" : "切换按住说话")
-                    .disabled(sending || uncertain)
-                if voiceMode {
-                    CodexHoldToTalk(voice: voice, service: service, preferLocal: preferLocalVoice,
-                                    disabled: sending || uncertain || (!preferLocalVoice && !service.connected)) { value in
-                        draft += (draft.isEmpty || draft.hasSuffix("\n") ? "" : "\n") + value
-                        voiceMode = false
-                        composerFocused = true
-                    }
-                } else {
-                    TextField("", text: $draft, prompt: Text("发消息…").foregroundColor(Color(uiColor: .secondaryLabel)), axis: .vertical)
-                        .font(.system(size: 17)).lineLimit(1...5).textFieldStyle(.plain)
-                        .frame(minHeight: 44).padding(.horizontal, 6)
-                        .focused($composerFocused).disabled(sending || uncertain)
-                }
-                Menu {
-                    Button("选择文件", systemImage: "doc") { importing = true }
-                    Button("选择照片", systemImage: "photo") { choosingPhoto = true }
-                } label: { Image(systemName: "plus").font(.system(size: 21, weight: .regular)).foregroundStyle(.secondary).frame(width: 44, height: 44) }
-                    .buttonStyle(.plain).accessibilityLabel("添加照片或文件")
-                    .disabled(sending || uncertain || loadingPhoto || attachments.count >= 6 || voice.active)
-                Button {
-                    scrollState.pause(); bottomScrollTask?.cancel()
-                    effortOpen.toggle()
-                } label: { Image(systemName: "gauge.with.dots.needle.50percent") }
-                    .buttonStyle(CodexComposerButtonStyle())
-                    .accessibilityLabel("思考强度，" + CodexEffortPicker.title(service.currentEffort.isEmpty ? (service.modelDefaultEfforts[service.currentModel] ?? "") : service.currentEffort))
-                    .disabled(!service.connected || !service.writable || sending || uncertain || voice.active || effortBusy)
-                if service.running { Button { Task { await service.stop(thread.id) } } label: { Image(systemName: "stop.fill").font(.system(size: 15)) }.buttonStyle(CodexComposerButtonStyle()).accessibilityLabel("停止") }
-                if !voiceMode {
-                    Button { Task { await send() } } label: { if sending { ProgressView() } else { Image(systemName: uncertain ? "arrow.clockwise" : "arrow.up") } }
-                        .buttonStyle(CodexComposerButtonStyle(primary: true)).accessibilityLabel(uncertain ? "重试发送" : "发送消息")
-                        .disabled(sending || effortBusy || loadingPhoto || !service.connected || !service.writable || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty && uploadedIDs.isEmpty) || browsingOlder)
-                }
-            }
+            messageComposer
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
             if uncertain { Button("已核实，清除输入") { if let id = pendingID { service.dismissOutgoing(id) }; clearPending(); service.error = nil }.font(.caption).padding(.bottom, 6) }
         }
