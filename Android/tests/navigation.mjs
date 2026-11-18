@@ -12,7 +12,8 @@ window.Native={call(id,op,json){let p=JSON.parse(json),r={};if(op==='boot')r=fix
 window.calls??=[];window.calls.push({op,p});
 if(op==='questionSubmit')r={state:'accepted',answers:p.answers};
 if(op==='zeroTierState')r={enabled:false,status:'已关闭',nodeID:'abc1234567'};
-if(op==='rpc'){switch(p.method){case 'quota':r=window.pc==='pc-b'?{available:false,windows:[]}:{available:true,windows:[{id:'codex:primary',label:'周额度',remainingPercent:11,resetsAt:2000000000}]};break;case 'threads':r={threads:[{id:'chat-'+window.pc,title:'测试对话 '+window.pc}]};break;case 'navigation':r={projects:[{id:'p1',name:'项目一'}],unread:[]};break;case 'activity':r={tasks:[]};break;case 'watch':r={writable:true};break;case 'history':r={messages:[{id:'m1',role:'assistant',text:'测试回复',turnId:'turn1'}]};break;case 'models':r={models:[{id:'test',name:'Test',efforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],defaultEffort:'low'},{id:'other',name:'Other',efforts:[{reasoningEffort:'medium'}],defaultEffort:'medium'}],current:{model:'test',reasoningEffort:'high'}};break;case 'queued':r={messages:[]};break;}}
+if(op==='rpc'){switch(p.method){case 'quota':r=window.pc==='pc-b'?{available:false,windows:[]}:{available:true,windows:[{id:'codex:primary',label:'周额度',remainingPercent:11,resetsAt:2000000000}]};break;case 'threads':r={threads:[{id:'chat-'+window.pc,title:'测试对话 '+window.pc}]};break;case 'navigation':r={projects:[{id:'p1',name:'项目一'}],unread:[]};break;case 'activity':r={tasks:[]};break;case 'watch':r={writable:true};break;case 'history':r={messages:[{id:'m1',role:'assistant',text:'测试回复',turnId:'turn1'}]};break;case 'models':r={models:[{id:'test',name:'Test',efforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}],defaultEffort:'low'},{id:'other',name:'Other',efforts:[{reasoningEffort:'medium'}],defaultEffort:'medium'}],current:{model:'test',reasoningEffort:'high'}};break;case 'setModel':if(window.failEffort){queueMicrotask(()=>nativeReply({id,error:'模拟同步失败'}));return;}window.modelChoice={model:p.params.model,reasoningEffort:p.params.effort||'medium'};r={current:window.modelChoice};break;case 'queued':r={messages:[]};break;}}
+if(op==='rpc'&&p.method==='models'){if(window.modelChoice)r.current=window.modelChoice;if(window.noEfforts)r.models.forEach(m=>m.efforts=[]);}
 if(op==='openclaw'){queueMicrotask(()=>nativeReply({id,error:'Gateway connection refused'}));return;}
 if(op==='connect')window.pc=p.id;
 if(op==='pair'){fixture.devices.push({hostId:'pc-c',name:'电脑 C'});r=fixture;}
@@ -52,10 +53,30 @@ try{
  await check('Unknown delivery only offers status check, no replay',`document.querySelector('[data-action=answerStatus]')!==null&&document.querySelector('[data-action=answer]')===null&&document.querySelector('[data-action=skipAllAnswers]')===null`);
  await run(`s.questions=[];renderQuestions();`);
  await run(`void modelPicker()`);await new Promise(r=>setTimeout(r,150));
- await check('Model and effort selectors display only supported choices',`document.querySelector('#modal [name=model]').options.length===2&&document.querySelector('#modal [name=effort]').value==='high'`);
- await run(`const select=document.querySelector('#modal [name=model]');select.value='other';select.dispatchEvent(new Event('change'));`);
- await check('Changing model refreshes supported effort and default',`document.querySelector('#modal [name=effort]').options.length===1&&document.querySelector('#modal [name=effort]').value==='medium'`);
- await run(`window.goBack();document.querySelector('.messages').innerHTML=markdown(${JSON.stringify('说明\n\n```sh\nprintf hello\n```')});`);
+ await check('Model picker leaves effort adjustment in composer',`document.querySelector('#modal [name=model]').options.length===2&&!document.querySelector('#modal [name=effort]')`);
+ await run(`window.goBack();s.draft='保留这段草稿';renderComposer();document.querySelector('#draft').focus();`);
+ await click('[data-action=effort]');
+ await check('Composer effort shows supported positions and current selection',`effortPanel.efforts.join(',')==='low,high'&&document.querySelector('#effortTrack').getAttribute('aria-valuetext')==='高'&&document.activeElement.id==='draft'`);
+ const rect=await run(`const r=document.querySelector('#effortTrack').getBoundingClientRect();return {left:r.left+24,right:r.right-24,y:r.top+28};`);
+ await cmd('Input.dispatchMouseEvent',{type:'mousePressed',x:rect.right,y:rect.y,button:'left',clickCount:1});
+ await cmd('Input.dispatchMouseEvent',{type:'mouseMoved',x:rect.left,y:rect.y,button:'left',buttons:1});
+ await check('Dragging previews without submitting',`document.querySelector('#effortValue').textContent==='低'&&!window.calls.some(c=>c.p.method==='setModel')`);
+ await cmd('Input.dispatchMouseEvent',{type:'mouseReleased',x:rect.left,y:rect.y,button:'left',clickCount:1});await new Promise(r=>setTimeout(r,200));
+ await check('Release submits once to the current thread and preserves draft focus',`window.calls.filter(c=>c.p.method==='setModel').length===1&&window.calls.findLast(c=>c.p.method==='setModel').p.params.effort==='low'&&window.calls.findLast(c=>c.p.method==='setModel').p.params.threadId===s.thread.id&&s.effort==='low'&&!document.querySelector('#effortPanel')&&document.querySelector('#draft').value==='保留这段草稿'&&document.activeElement.id==='draft'`);
+ await run(`window.failEffort=true;await openEffort();document.querySelector('#effortTrack').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));`);await new Promise(r=>setTimeout(r,150));
+ await check('Failed effort sync keeps picker and confirmed setting',`document.querySelector('#effortPanel').textContent.includes('模拟同步失败')&&s.effort==='low'&&!effortPanel.busy`);
+ await run(`window.failEffort=false;closeEffort();window.noEfforts=true;await openEffort();`);
+ await check('Unsupported models do not invent effort choices',`!document.querySelector('#effortTrack')&&document.querySelector('#effortPanel').textContent.includes('未提供')`);
+ await run(`closeEffort();window.noEfforts=false;await openEffort();effortPanel.efforts=['low','medium','high','xhigh','max','ultra'];effortPanel.index=4;renderEffort();`);
+ await run(`document.querySelector('#toast').hidden=true;`);
+ await cmd('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});await new Promise(r=>setTimeout(r,150));
+ await fs.writeFile('Build/effort-composer-light-022.png',Buffer.from((await cmd('Page.captureScreenshot',{format:'png'})).data,'base64'));
+ await cmd('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'dark'}]});
+ await new Promise(r=>setTimeout(r,150));
+ await fs.writeFile('Build/effort-composer-dark-022.png',Buffer.from((await cmd('Page.captureScreenshot',{format:'png'})).data,'base64'));
+ await cmd('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]});
+ await run(`closeEffort();`);
+ await run(`document.querySelector('.messages').innerHTML=markdown(${JSON.stringify('说明\n\n```sh\nprintf hello\n```')});`);
  await click('[data-action=copyCode]');
  await check('Code copy excludes prose and button label',`window.calls.findLast(c=>c.op==='copy').p.text.trim()==='printf hello'`);
  await run(`renderChat()`);

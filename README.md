@@ -1,6 +1,6 @@
 # AstroGate 管家
 
-当前版本：**iPhone 0.4.31、Android 0.2.1、Windows 连接程序 0.4.34**。Android 支持 Android 10 及以上，可直接安装 APK；复用现有电脑连接程序与加密中转。[Android 使用和构建说明](Android/README.md)。
+当前版本：**iPhone 0.4.32、Android 0.2.2、Windows 连接程序 0.4.34**。Android 支持 Android 10 及以上，可直接安装 APK；复用现有电脑连接程序与加密中转。[Android 使用和构建说明](Android/README.md)。
 
 底部入口依次为 **Codex、连接、服务、设置**。Codex 是聊天主页；连接页显示已绑定电脑并支持扫码新建连接，选中电脑后进入 Codex；服务页包含文件管理器和 SSH、SFTP、OpenClaw 服务。原有配对与文件继续保留。
 
@@ -15,6 +15,8 @@
 SwiftUI 文件管理器，支持本地文件浏览与操作、文本编辑、双窗口、SFTP、SSH 终端、Codex 电脑连接和 OpenClaw 聊天。
 
 ## 本版改动
+
+- iPhone 0.4.32 / Android 0.2.2：思考强度移到输入框旁的仪表按钮，点开后滑动或点选模型支持的档位，松手同步并收起；保留草稿与键盘焦点，失败时保留面板供重试。模型选择页只选择模型。
 
 - iPhone 0.4.31 / Android 0.2.1：聊天页移除连接状态与剩余额度；Codex 账号额度改到“连接”页对应设备右侧，可点开详情。API 中转站或没有额度数据的设备不显示额度。
 

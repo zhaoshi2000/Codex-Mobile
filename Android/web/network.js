@@ -37,11 +37,60 @@ async function hostWeb(address='http://localhost:3000'){
  s.hostIP=v.host;await call('hostWeb',{url:v.url,direct:v.__choice==='direct',host:v.host});
 }
 async function modelPicker(){
- const r=await rpc('models',{threadId:s.thread.id});
- const promise=modal('模型与推理',`<label>当前模型</label><select name="model">${r.models.map(m=>`<option value="${E(m.id)}" ${m.id===r.current?.model?'selected':''}>${E(m.name||m.id)}</option>`).join('')}</select><label>推理强度</label><select name="effort"></select><p class="hint">仅列出模型支持的档位。运行期间切换会用于后续轮次。</p>`);
- const update=()=>{const m=r.models.find(m=>m.id===$('#modal [name=model]').value);$('#modal [name=effort]').innerHTML=(m?.efforts||[]).map(e=>`<option value="${E(e.reasoningEffort)}" ${e.reasoningEffort===(r.current?.model===m.id?r.current.reasoningEffort:m.defaultEffort)?'selected':''}>${E(({low:'低',medium:'中',high:'高',xhigh:'更高',max:'最高',ultra:'极高'})[e.reasoningEffort]||e.reasoningEffort)} · ${E(e.reasoningEffort)}</option>`).join('')||'<option value="">模型默认</option>';};$('#modal [name=model]').onchange=update;update();
- const v=await promise;if(v){const result=await rpc('setModel',{threadId:s.thread.id,model:v.model,...(v.effort?{effort:v.effort}:{})});s.model=result.current?.model||v.model;renderStatus();}
+ const thread=s.thread.id,host=s.device.hostId,r=await rpc('models',{threadId:thread});
+ if(s.thread?.id!==thread||s.device?.hostId!==host)return;
+ s.models=r.models||[];s.model=r.current?.model;s.effort=r.current?.reasoningEffort||'';
+ const v=await modal('选择模型',`<label>当前模型</label><select name="model">${s.models.map(m=>`<option value="${E(m.id)}" ${m.id===s.model?'selected':''}>${E(m.name||m.id)}</option>`).join('')}</select><p class="hint">思考强度在输入框旁调整。新模型用于后续轮次。</p>`);
+ if(v&&s.thread?.id===thread&&s.device?.hostId===host){const result=await rpc('setModel',{threadId:thread,model:v.model});if(s.thread?.id!==thread||s.device?.hostId!==host)return;s.model=result.current?.model||v.model;s.effort=result.current?.reasoningEffort||'';renderStatus();}
 }
+let effortPanel=null;
+const effortTitle=e=>({none:'不推理',minimal:'最少',low:'低',medium:'中',high:'高',xhigh:'更高',max:'最高',ultra:'极高'})[e]||e||'模型默认';
+function closeEffort(){effortPanel=null;$('#effortPanel')?.remove();const send=$('#composer .send');if(send)send.disabled=s.uploading||!s.connected;}
+function positionEffort(){const p=$('#effortPanel');if(p){const r=$('#composer').getBoundingClientRect();p.style.bottom=Math.max(8,innerHeight-r.top+8)+'px';}}
+function renderEffort(){
+ const p=effortPanel;if(!p)return;
+ if(s.route!=='chat'||s.tab!=='codex'||s.thread?.id!==p.thread||s.device?.hostId!==p.host){closeEffort();return;}
+ let box=$('#effortPanel');if(!box){box=document.createElement('section');box.id='effortPanel';document.body.append(box);}
+ const send=$('#composer .send');if(send)send.disabled=p.busy||s.uploading||!s.connected;
+ box.setAttribute('aria-label','思考强度');
+ box.innerHTML=`<div class="row"><small class="grow">思考强度</small>${btn('closeEffort','close','关闭思考强度',p.busy?'disabled':'')}</div>${p.loading?'<p class="hint">正在读取可用档位…</p>':p.efforts.length?`<strong id="effortValue">${E(effortTitle(p.efforts[p.index]))}</strong><div id="effortTrack" role="slider" tabindex="0" aria-label="思考强度" aria-valuemin="0" aria-valuemax="${p.efforts.length-1}" aria-valuenow="${p.index}" aria-valuetext="${E(effortTitle(p.efforts[p.index]))}" aria-disabled="${!!p.busy}"><div class="effortFill"></div>${p.efforts.map((e,i)=>`<i style="left:calc(24px + (100% - 48px) * ${i/Math.max(1,p.efforts.length-1)})"></i>`).join('')}<span class="effortThumb"></span></div><p class="hint">${p.busy?'正在同步到电脑…':s.busy?'下一轮生效':'滑动或点选档位，下一条消息生效'}</p>`:'<p class="hint">当前模型未提供可调整的思考强度</p><button data-action="retryEffort">重新读取</button>'}${p.error?`<p class="error">${E(p.error)}</p>`:''}`;
+ const track=$('#effortTrack');
+ if(track){
+  const update=e=>{const rect=track.getBoundingClientRect();p.index=Math.max(0,Math.min(p.efforts.length-1,Math.round((e.clientX-rect.left-24)/Math.max(1,rect.width-48)*(p.efforts.length-1))));paintEffort();};
+  track.onpointerdown=e=>{if(p.busy||!s.connected)return;e.preventDefault();p.pointer=e.pointerId;track.setPointerCapture(e.pointerId);update(e);};
+  track.onpointermove=e=>{if(p.pointer===e.pointerId)update(e);};
+  track.onpointerup=e=>{if(p.pointer!==e.pointerId)return;p.pointer=null;safe(()=>saveEffort(p));};
+  track.onpointercancel=()=>{p.pointer=null;};
+  track.onkeydown=e=>{if(p.busy||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();p.index=Math.max(0,Math.min(p.efforts.length-1,p.index+(['ArrowRight','ArrowUp'].includes(e.key)?1:-1)));paintEffort();safe(()=>saveEffort(p));};
+ }
+ paintEffort();positionEffort();
+}
+function paintEffort(){const p=effortPanel,t=$('#effortTrack');if(!p||!t)return;const v=effortTitle(p.efforts[p.index]);t.style.setProperty('--position',p.index/Math.max(1,p.efforts.length-1));t.setAttribute('aria-valuenow',p.index);t.setAttribute('aria-valuetext',v);$('#effortValue').textContent=v;}
+async function openEffort(){
+ if(!s.connected||!s.writable||effortPanel?.busy)return;
+ if(effortPanel&&!effortPanel.error){closeEffort();return;}
+ const p={thread:s.thread.id,host:s.device.hostId,loading:true,busy:false,efforts:[],index:0};effortPanel=p;renderEffort();
+ try{const r=await rpc('models',{threadId:p.thread});if(effortPanel!==p||s.thread?.id!==p.thread||s.device?.hostId!==p.host)return;
+ s.models=r.models||[];s.model=r.current?.model;s.effort=r.current?.reasoningEffort||'';p.model=s.model;
+ const m=s.models.find(m=>m.id===p.model);p.efforts=[...new Set((m?.efforts||[]).map(e=>e.reasoningEffort).filter(Boolean))];p.current=s.effort||m?.defaultEffort||'';p.index=Math.max(0,p.efforts.indexOf(p.current));
+ }catch(e){p.error=e.message;}finally{p.loading=false;if(effortPanel===p)renderEffort();}
+}
+async function saveEffort(p){
+ if(effortPanel!==p||p.busy||!s.connected||!s.writable)return;
+ if(s.thread?.id!==p.thread||s.device?.hostId!==p.host){closeEffort();return;}
+ if(s.model!==p.model){p.error='模型已变更，请重新读取档位';p.efforts=[];renderEffort();return;}
+ const effort=p.efforts[p.index];if(!effort)return;if(effort===p.current){closeEffort();return;}
+ p.busy=true;p.error=null;renderEffort();
+ try{const r=await rpc('setModel',{threadId:p.thread,model:p.model,effort});if(effortPanel!==p||s.thread?.id!==p.thread||s.device?.hostId!==p.host)return;s.model=r.current?.model||p.model;s.effort=r.current?.reasoningEffort||effort;closeEffort();renderStatus();}
+ catch(e){p.error='未能切换：'+e.message;}
+ finally{p.busy=false;if(effortPanel===p)renderEffort();}
+}
+// Pointer controls preserve the draft's keyboard; keyboard navigation remains available.
+document.addEventListener('pointerdown',e=>{
+ if(e.target.closest('[data-action=effort],#effortPanel')){if(!e.target.closest('#effortTrack'))e.preventDefault();return;}
+ if(effortPanel&&!effortPanel.busy)closeEffort();
+});
+window.addEventListener('resize',positionEffort);window.visualViewport?.addEventListener('resize',positionEffort);
 let previewSequence=0,previewGallery=[],previewIndex=0;const originalImages=new Map();
 async function previewImage(photo,photos=[photo],index=0){
  previewGallery=photos;previewIndex=index;const token=++previewSequence;

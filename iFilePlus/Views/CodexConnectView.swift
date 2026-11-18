@@ -377,6 +377,9 @@ private struct CodexChatContent: View {
     @AppStorage("codex.voice.preferLocal.v1") private var preferLocalVoice = true
     @State private var navigationOpen = false
     @State private var modelsOpen = false
+    @State private var effortOpen = false
+    @State private var effortBusy = false
+    @State private var composerHeight: CGFloat = 76
     @State private var preview: CodexPreviewFile?
     @State private var previewLoading = false
     @State private var forkMessage: CodexChatMessage?
@@ -521,16 +524,32 @@ private struct CodexChatContent: View {
                 } label: { Image(systemName: "plus").font(.system(size: 21, weight: .regular)).foregroundStyle(.secondary).frame(width: 44, height: 44) }
                     .buttonStyle(.plain).accessibilityLabel("添加照片或文件")
                     .disabled(sending || uncertain || loadingPhoto || attachments.count >= 6 || voice.active)
+                Button {
+                    scrollState.pause(); bottomScrollTask?.cancel()
+                    effortOpen.toggle()
+                } label: { Image(systemName: "gauge.with.dots.needle.50percent") }
+                    .buttonStyle(CodexComposerButtonStyle())
+                    .accessibilityLabel("思考强度，" + CodexEffortPicker.title(service.currentEffort.isEmpty ? (service.modelDefaultEfforts[service.currentModel] ?? "") : service.currentEffort))
+                    .disabled(!service.connected || !service.writable || sending || uncertain || voice.active || effortBusy)
                 if service.running { Button { Task { await service.stop(thread.id) } } label: { Image(systemName: "stop.fill").font(.system(size: 15)) }.buttonStyle(CodexComposerButtonStyle()).accessibilityLabel("停止") }
                 if !voiceMode {
                     Button { Task { await send() } } label: { if sending { ProgressView() } else { Image(systemName: uncertain ? "arrow.clockwise" : "arrow.up") } }
                         .buttonStyle(CodexComposerButtonStyle(primary: true)).accessibilityLabel(uncertain ? "重试发送" : "发送消息")
-                        .disabled(sending || loadingPhoto || !service.connected || !service.writable || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty && uploadedIDs.isEmpty) || browsingOlder)
+                        .disabled(sending || effortBusy || loadingPhoto || !service.connected || !service.writable || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty && uploadedIDs.isEmpty) || browsingOlder)
                 }
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
             if uncertain { Button("已核实，清除输入") { if let id = pendingID { service.dismissOutgoing(id) }; clearPending(); service.error = nil }.font(.caption).padding(.bottom, 6) }
         }
         .accessibilityHidden(navigationOpen)
+        .overlay(alignment: .bottom) {
+            if effortOpen {
+                Color.primary.opacity(0.025).contentShape(Rectangle())
+                    .onTapGesture { if !effortBusy { effortOpen = false } }
+                CodexEffortPicker(service: service, threadID: thread.id, showing: $effortOpen, busy: $effortBusy)
+                    .frame(maxWidth: 420).padding(.horizontal, 20).padding(.bottom, composerHeight + 8)
+            }
+        }
         .overlay { chatNavigationOverlay }
         .overlay {
             if previewLoading {
@@ -567,7 +586,7 @@ private struct CodexChatContent: View {
             while !Task.isCancelled {
                 if scenePhase == .active {
                     await service.refreshActivity()
-                    if bottomDistance < 140 && !browsingOlder && !navigationOpen && !modelsOpen && preview == nil { await service.markRead(thread.id) }
+                    if bottomDistance < 140 && !browsingOlder && !navigationOpen && !modelsOpen && !effortOpen && preview == nil { await service.markRead(thread.id) }
                 }
                 try? await Task.sleep(for: .seconds(4))
             }

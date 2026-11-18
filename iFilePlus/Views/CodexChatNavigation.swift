@@ -461,6 +461,110 @@ struct CodexFilePreview: UIViewControllerRepresentable {
     }
 }
 
+/// Keeps keyboard focus and the chat's scroll position while adjusting the next turn.
+struct CodexEffortPicker: View {
+    @ObservedObject var service: CodexConnectService
+    let threadID: String
+    @Binding var showing: Bool
+    @Binding var busy: Bool
+    @State private var selected = 0
+    @State private var loading = false
+    @State private var error: String?
+    private var efforts: [String] { service.modelEfforts[service.currentModel] ?? [] }
+    private var effective: String { service.currentEffort.isEmpty ? (service.modelDefaultEfforts[service.currentModel] ?? "") : service.currentEffort }
+    private var value: String { efforts.indices.contains(selected) ? efforts[selected] : "" }
+    static func title(_ value: String) -> String {
+        ["": "模型默认", "none": "不推理", "minimal": "最少", "low": "低", "medium": "中", "high": "高", "xhigh": "更高", "max": "最高", "ultra": "极高"][value] ?? value
+    }
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("思考强度").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button { showing = false } label: { Image(systemName: "xmark").frame(width: 32, height: 32) }
+                    .buttonStyle(.plain).accessibilityLabel("关闭思考强度").disabled(busy)
+            }
+            if loading { ProgressView("正在读取可用档位…") }
+            else if efforts.isEmpty {
+                Text("当前模型未提供可调整的思考强度").font(.subheadline).foregroundStyle(.secondary)
+                Button("重新读取") { Task { await refresh() } }.disabled(!service.connected)
+            } else {
+                Text(Self.title(value)).font(.system(size: 24, weight: .semibold))
+                track
+                HStack(spacing: 8) {
+                    if busy { ProgressView().controlSize(.small) }
+                    Text(busy ? "正在同步到电脑…" : service.running ? "下一轮生效" : "滑动或点选档位，下一条消息生效")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if let error { Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+        }
+        .padding(16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28))
+        .overlay { RoundedRectangle(cornerRadius: 28).strokeBorder(.primary.opacity(0.08), lineWidth: 0.5) }
+        .shadow(color: .black.opacity(0.12), radius: 18, y: 6)
+        .task { if efforts.isEmpty { await refresh() }; resetSelection() }
+        .onChange(of: effective) { _, _ in if !busy { resetSelection() } }
+        .onChange(of: service.currentModel) { _, _ in resetSelection() }
+        .onChange(of: efforts) { _, _ in resetSelection() }
+    }
+    private var track: some View {
+        GeometryReader { geometry in
+            let width = max(0, geometry.size.width - 56)
+            let count = max(1, efforts.count - 1)
+            let position = CGFloat(selected) / CGFloat(count) * width
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.08))
+                Capsule().fill(Color.accentColor).frame(width: 56 + position)
+                ForEach(Array(efforts.enumerated()), id: \.element) { index, _ in
+                    Circle().fill(index <= selected ? Color.white.opacity(0.35) : Color.primary.opacity(0.2))
+                        .frame(width: 8, height: 8).offset(x: 24 + CGFloat(index) / CGFloat(count) * width)
+                }
+                Circle().fill(.white).frame(width: 44, height: 44)
+                    .shadow(color: .black.opacity(0.1), radius: 3, y: 1).offset(x: 6 + position)
+            }
+            .contentShape(Capsule())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { gesture in
+                    guard !busy, service.connected, service.writable else { return }
+                    selected = max(0, min(efforts.count - 1, Int(((gesture.location.x - 28) / max(1, width) * CGFloat(count)).rounded())))
+                }
+                .onEnded { _ in save() })
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("思考强度")
+            .accessibilityValue(Self.title(value))
+            .accessibilityAdjustableAction { direction in
+                guard !busy, service.connected, service.writable else { return }
+                switch direction {
+                case .increment: selected = min(efforts.count - 1, selected + 1)
+                case .decrement: selected = max(0, selected - 1)
+                @unknown default: return
+                }
+                save()
+            }
+            .opacity(busy || !service.writable ? 0.5 : 1)
+        }.frame(height: 56)
+    }
+    private func resetSelection() { selected = efforts.firstIndex(of: effective) ?? 0 }
+    private func refresh() async {
+        loading = true; defer { loading = false }
+        await service.refreshModels(threadID)
+    }
+    private func save() {
+        guard !busy, service.connected, service.writable, efforts.indices.contains(selected) else { return }
+        let effort = value, model = service.currentModel
+        if effort == effective { showing = false; return }
+        busy = true; error = nil
+        Task {
+            defer { busy = false }
+            do {
+                try await service.chooseModel(model, threadID: threadID, effort: effort)
+                showing = false
+            } catch { self.error = "未能切换：" + error.localizedDescription }
+        }
+    }
+}
+
 struct CodexModelPicker: View {
     @ObservedObject var service: CodexConnectService
     let threadID: String
@@ -470,8 +574,6 @@ struct CodexModelPicker: View {
     @State private var expanded: String?
     @State private var refreshing = false
     private var modelTitle: String { service.models.first(where: { $0.id == service.currentModel })?.title ?? (service.currentModel.isEmpty ? "尚未读取" : service.currentModel) }
-    private var effectiveEffort: String { service.currentEffort.isEmpty ? (service.modelDefaultEfforts[service.currentModel] ?? "") : service.currentEffort }
-    private var efforts: [String] { service.modelEfforts[service.currentModel] ?? [] }
     var body: some View {
         NavigationStack {
             List {
@@ -486,23 +588,15 @@ struct CodexModelPicker: View {
                     } label: { selectionLabel("当前模型", value: modelTitle, icon: "sparkles") }
                 }
                 Section {
-                    DisclosureGroup(isExpanded: expansion("effort")) {
-                        ForEach(efforts, id: \.self) { effort in
-                            Button { choose(service.currentModel, effort: effort) } label: {
-                                option(effortTitle(effort), selected: effort == effectiveEffort)
-                            }.disabled(busy || refreshing || !service.connected)
-                        }
-                        if efforts.isEmpty { Text("当前模型未提供可调整的推理强度。").font(.caption).foregroundStyle(.secondary) }
-                    } label: { selectionLabel("推理强度", value: effectiveEffort.isEmpty ? "模型默认" : effortTitle(effectiveEffort), icon: "slider.horizontal.3") }
-                } footer: {
-                    Text(service.running ? "当前任务继续运行，新选择将在下一轮生效。" : "选择后自动同步到电脑，下一条消息将使用新设置。")
-                }
+                    Text(service.running ? "新模型将在下一轮生效。思考强度可在输入框旁调整。" : "选择后同步到电脑。思考强度可在输入框旁调整。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }.listRowBackground(Color.clear)
                 if busy || refreshing {
                     HStack(spacing: 10) { ProgressView(); Text(busy ? "正在同步…" : "正在读取…").font(.footnote).foregroundStyle(.secondary) }
                         .listRowBackground(Color.clear)
                 }
                 if let error { Text(error).font(.footnote).foregroundStyle(.red) }
-            }.listStyle(.insetGrouped).navigationTitle("模型与推理").navigationBarTitleDisplayMode(.inline)
+            }.listStyle(.insetGrouped).navigationTitle("选择模型").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() }.disabled(busy) }
                     ToolbarItem(placement: .topBarTrailing) { Button { Task { await refresh() } } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("刷新可用模型").disabled(busy || refreshing || !service.connected) }
@@ -545,10 +639,7 @@ struct CodexModelPicker: View {
         refreshing = true; defer { refreshing = false }
         await service.refreshModels(threadID)
     }
-    private func effortTitle(_ value: String) -> String {
-        let names = ["none": "不推理", "minimal": "最少", "low": "低", "medium": "中", "high": "高", "xhigh": "更高", "max": "最高", "ultra": "极高"]
-        return names[value].map { $0 + " · " + value } ?? value
-    }
+
 }
 
 struct CodexChatNavigation: View {

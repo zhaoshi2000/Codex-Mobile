@@ -1,6 +1,7 @@
 "use strict";
+var _b;
 const $ = (s2) => document.querySelector(s2), E = Core.escape;
-const icons = { files: "M3 6h6l2 2h10v12H3z M3 6V4h7l2 2", connect: "M2 3h20v14H2z M12 17v4 M7 21h10", services: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z", codex: "M3 4h18v16H3z M7 9l3 3-3 3 M13 15h4", settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M5 19l2-2 M17 7l2-2", menu: "M4 6h16 M4 12h16 M4 18h16", back: "M15 5l-7 7 7 7", plus: "M12 4v16 M4 12h16", send: "M12 20V4 M5 11l7-7 7 7", stop: "M6 6h12v12H6z", copy: "M9 8h11v13H9z M15 8V3H4v13h5", fork: "M7 3v7c0 3 5 3 5 6v5 M17 3v7c0 3-5 3-5 6 M4 3h6 M14 3h6", down: "M5 9l7 7 7-7", more: "M5 12h.01 M12 12h.01 M19 12h.01", image: "M3 3h18v18H3z M3 17l6-6 4 4 3-3 5 5 M15 7h.01", scan: "M3 8V3h5 M16 3h5v5 M3 16v5h5 M16 21h5v-5 M7 7h3v3H7z M14 7h3v3h-3z M7 14h3v3H7z M14 14h3v3h-3z", file: "M5 2h9l5 5v15H5z M14 2v6h5 M8 12h8 M8 16h8", close: "M5 5l14 14 M19 5L5 19", cloud: "M6 18a5 5 0 0 1-1-10 7 7 0 0 1 13-1 5 5 0 0 1 0 11z", edit: "M4 16l11-11 4 4L8 20H4z M14 6l4 4", check: "M4 12l5 5L20 6", share: "M12 16V2 M7 7l5-5 5 5 M5 11H3v11h18V11h-2" };
+const icons = { effort: "M4 18a9 9 0 1 1 16 0 M12 13l5-5 M7 8h.01 M12 5h.01 M17 8h.01 M10 15a2 2 0 1 0 4 0 2 2 0 0 0-4 0", files: "M3 6h6l2 2h10v12H3z M3 6V4h7l2 2", connect: "M2 3h20v14H2z M12 17v4 M7 21h10", services: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z", codex: "M3 4h18v16H3z M7 9l3 3-3 3 M13 15h4", settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M5 19l2-2 M17 7l2-2", menu: "M4 6h16 M4 12h16 M4 18h16", back: "M15 5l-7 7 7 7", plus: "M12 4v16 M4 12h16", send: "M12 20V4 M5 11l7-7 7 7", stop: "M6 6h12v12H6z", copy: "M9 8h11v13H9z M15 8V3H4v13h5", fork: "M7 3v7c0 3 5 3 5 6v5 M17 3v7c0 3-5 3-5 6 M4 3h6 M14 3h6", down: "M5 9l7 7 7-7", more: "M5 12h.01 M12 12h.01 M19 12h.01", image: "M3 3h18v18H3z M3 17l6-6 4 4 3-3 5 5 M15 7h.01", scan: "M3 8V3h5 M16 3h5v5 M3 16v5h5 M16 21h5v-5 M7 7h3v3H7z M14 7h3v3h-3z M7 14h3v3H7z M14 14h3v3h-3z", file: "M5 2h9l5 5v15H5z M14 2v6h5 M8 12h8 M8 16h8", close: "M5 5l14 14 M19 5L5 19", cloud: "M6 18a5 5 0 0 1-1-10 7 7 0 0 1 13-1 5 5 0 0 1 0 11z", edit: "M4 16l11-11 4 4L8 20H4z M14 6l4 4", check: "M4 12l5 5L20 6", share: "M12 16V2 M7 7l5-5 5 5 M5 11H3v11h18V11h-2" };
 const icon = (n) => `<span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icons[n] || icons.file}"/></svg></span>`;
 const btn = (action2, name, title = "", extra = "") => `<button data-action="${action2}" aria-label="${E(title || name)}" ${extra}>${icon(name)}</button>`;
 const pending = /* @__PURE__ */ new Map();
@@ -75,6 +76,7 @@ function tabs() {
 }
 function showPage(html, classes = "") {
   var _a;
+  closeEffort();
   const page = $("#page");
   page.className = classes;
   page.innerHTML = html;
@@ -114,6 +116,8 @@ function renderCodexHome() {
   showPage(empty("在手机继续 Codex 对话", "连接一台电脑，即可查看项目、继续对话或新建对话。", `<button class="primary" data-action="devices">连接电脑</button>`));
 }
 function resetCodex() {
+  closeEffort();
+  s.effort = "";
   s.answers = {};
   s.qstates = {};
   s.customAnswers = /* @__PURE__ */ new Set();
@@ -168,7 +172,7 @@ async function pair(uri) {
   await connect(d.hostId);
 }
 async function connect(id) {
-  var _a, _b;
+  var _a, _b2;
   if (s.loading) return;
   if (((_a = s.device) == null ? void 0 : _a.hostId) === id && s.connected) {
     s.tab = "codex";
@@ -181,7 +185,7 @@ async function connect(id) {
   s.loading = true;
   toast("正在验证电脑身份…");
   try {
-    if (((_b = s.device) == null ? void 0 : _b.hostId) !== id) resetCodex();
+    if (((_b2 = s.device) == null ? void 0 : _b2.hostId) !== id) resetCodex();
     s.connected = false;
     s.device = null;
     await call("connect", { id });
@@ -197,11 +201,11 @@ async function connect(id) {
   }
 }
 async function loadThreads(more = false) {
-  var _a, _b;
+  var _a, _b2;
   if (!s.connected) return;
   const deviceID = (_a = s.device) == null ? void 0 : _a.hostId;
   const [page, nav, activity] = await Promise.all([rpc("threads", { limit: 20, ...s.navProject ? { projectId: s.navProject } : {}, ...more && s.threadCursor ? { cursor: s.threadCursor } : {} }), rpc("navigation"), rpc("activity")]);
-  if (((_b = s.device) == null ? void 0 : _b.hostId) !== deviceID || !s.connected) return;
+  if (((_b2 = s.device) == null ? void 0 : _b2.hostId) !== deviceID || !s.connected) return;
   s.threads = more ? [...s.threads, ...page.threads] : page.threads || [];
   s.threadCursor = page.nextCursor;
   s.projects = nav.projects || [];
@@ -234,7 +238,9 @@ function drawer() {
   };
 }
 async function openThread(id) {
-  var _a, _b, _c, _d;
+  var _a, _b2, _c, _d;
+  closeEffort();
+  s.effort = "";
   $("#drawer").hidden = true;
   const old = (_a = s.thread) == null ? void 0 : _a.id;
   if (old && old !== id) await rpc("unwatch", { threadId: old });
@@ -251,7 +257,7 @@ async function openThread(id) {
   renderChat();
   const token = id;
   const watch = await rpc("watch", { threadId: id });
-  if (((_b = s.thread) == null ? void 0 : _b.id) !== token) return;
+  if (((_b2 = s.thread) == null ? void 0 : _b2.id) !== token) return;
   s.writable = watch.writable;
   s.status = watch.message;
   const history = await rpc("history", { threadId: id });
@@ -261,11 +267,12 @@ async function openThread(id) {
   renderChat(true);
   safe(() => rpc("markRead", { threadId: id }));
   safe(async () => {
-    var _a2, _b2;
+    var _a2, _b3, _c2;
     const r = await rpc("models", { threadId: id });
     if (((_a2 = s.thread) == null ? void 0 : _a2.id) === id) {
       s.models = r.models;
-      s.model = (_b2 = r.current) == null ? void 0 : _b2.model;
+      s.model = (_b3 = r.current) == null ? void 0 : _b3.model;
+      s.effort = ((_c2 = r.current) == null ? void 0 : _c2.reasoningEffort) || "";
       renderStatus();
     }
   });
@@ -283,8 +290,8 @@ async function openThread(id) {
   }
 }
 function deviceQuotaHTML(id) {
-  var _a, _b, _c;
-  const data = id === ((_a = s.device) == null ? void 0 : _a.hostId) ? s.quota : (_b = deviceQuotas.get(id)) == null ? void 0 : _b.data;
+  var _a, _b2, _c;
+  const data = id === ((_a = s.device) == null ? void 0 : _a.hostId) ? s.quota : (_b2 = deviceQuotas.get(id)) == null ? void 0 : _b2.data;
   const q = (data == null ? void 0 : data.available) !== false && ((_c = data == null ? void 0 : data.windows) == null ? void 0 : _c[0]);
   if (!q) return "";
   return `<button class="devicequota" data-action="quota" data-id="${E(id)}"><small>${E(q.label)}</small><span>剩余 ${Math.round(q.remainingPercent)}%</span></button>`;
@@ -293,13 +300,13 @@ function renderDeviceQuotas() {
   document.querySelectorAll("[data-device-quota]").forEach((el) => el.innerHTML = deviceQuotaHTML(el.dataset.deviceQuota));
 }
 async function refreshQuota(force = false) {
-  var _a, _b, _c;
+  var _a, _b2, _c;
   const id = (_a = s.device) == null ? void 0 : _a.hostId;
   if (!s.connected || !id || s.quotaLoading === id || !force && Date.now() - (s.quotaAt || 0) < 6e4) return;
   s.quotaLoading = id;
   try {
     const q = await rpc("quota");
-    if (((_b = s.device) == null ? void 0 : _b.hostId) === id && s.connected) {
+    if (((_b2 = s.device) == null ? void 0 : _b2.hostId) === id && s.connected) {
       s.quota = q;
       s.quotaAt = Date.now();
       deviceQuotas.set(id, { data: q, at: s.quotaAt });
@@ -316,9 +323,9 @@ async function refreshQuota(force = false) {
   }
 }
 async function showQuota(id = ((_a) => (_a = s.device) == null ? void 0 : _a.hostId)()) {
-  var _a2, _b, _c;
+  var _a2, _b2, _c;
   if (id === ((_a2 = s.device) == null ? void 0 : _a2.hostId)) await refreshQuota(true);
-  const record = deviceQuotas.get(id), q = (id === ((_b = s.device) == null ? void 0 : _b.hostId) ? s.quota : record == null ? void 0 : record.data) || {}, device = s.boot.devices.find((d) => d.hostId === id);
+  const record = deviceQuotas.get(id), q = (id === ((_b2 = s.device) == null ? void 0 : _b2.hostId) ? s.quota : record == null ? void 0 : record.data) || {}, device = s.boot.devices.find((d) => d.hostId === id);
   await modal(deviceName(device || {}) + " · Codex 额度", ((q.windows || []).map((w) => `<div class="card"><strong>${E(w.label)} · 剩余 ${Math.round(w.remainingPercent)}%</strong><progress value="${w.remainingPercent}" max="100"></progress>${w.resetsAt ? '<p class="hint">重置时间：' + E(new Date(w.resetsAt * 1e3).toLocaleString()) + "</p>" : ""}</div>`).join("") || `<p>${E(q.message || "暂无额度数据")}</p>`) + ((record == null ? void 0 : record.at) ? `<p class="hint">查询时间：${E(new Date(record.at).toLocaleString())}${id !== ((_c = s.device) == null ? void 0 : _c.hostId) ? "；连接此设备可刷新" : ""}</p>` : ""), [["完成", false]]);
 }
 function renderStatus() {
@@ -373,7 +380,7 @@ function messagesHTML() {
   }).join("");
 }
 function renderChat(bottom = false) {
-  var _a, _b;
+  var _a, _b2;
   if (s.tab !== "codex" || s.route !== "chat") return;
   tabs();
   header(((_a = s.thread) == null ? void 0 : _a.title) || "对话", `${btn("drawer", "menu", "打开对话列表")}${s.tasks.length ? `<small>${s.tasks.length}</small>` : ""}`, btn("computerFiles", "files", "电脑文件"));
@@ -381,7 +388,7 @@ function renderChat(bottom = false) {
   let previous = page.scrollTop, atBottom = page.scrollHeight - page.clientHeight - page.scrollTop < 120;
   const wasChat = page.classList.contains("chatpage");
   page.className = "chatpage";
-  page.innerHTML = `<div class="chatstatus" id="status"></div>${s.cursor ? '<button data-action="older">加载更早的消息</button>' : ""}<div class="messages">${messagesHTML()}</div><div id="questions"></div><div class="progressline">${s.busy ? '<i class="spinner"></i>' + E(((_b = s.progress) == null ? void 0 : _b.label) || "正在处理…") : s.messages.length ? "Codex 处理完成" : ""}</div>`;
+  page.innerHTML = `<div class="chatstatus" id="status"></div>${s.cursor ? '<button data-action="older">加载更早的消息</button>' : ""}<div class="messages">${messagesHTML()}</div><div id="questions"></div><div class="progressline">${s.busy ? '<i class="spinner"></i>' + E(((_b2 = s.progress) == null ? void 0 : _b2.label) || "正在处理…") : s.messages.length ? "Codex 处理完成" : ""}</div>`;
   renderStatus();
   renderQuestions();
   renderComposer();
@@ -408,7 +415,7 @@ function renderComposer() {
   const el = $("#composer");
   el.hidden = false;
   const focus = $("#draft") === document.activeElement, selection = (_a = $("#draft")) == null ? void 0 : _a.selectionStart;
-  el.innerHTML = `<div id="downloadBox"></div><div class="attachments">${s.attachments.map((a, i) => `<span class="pill">${E(a.name)}<button data-action="removeAttachment" data-index="${i}" aria-label="移除附件">×</button></span>`).join("")}</div><div id="queueBox">${s.queue.map((q) => `<div class="queued row"><div class="grow"><div class="ellipsis">${E(q.displayText || q.text || "附件消息")}</div><small>${E(q.error || "等待当前任务完成")}</small></div><button data-action="steer" data-id="${E(q.id)}" ${q.editable === false ? "disabled" : ""}>↪ 引导</button><button data-action="removeQueued" data-id="${E(q.id)}" aria-label="删除等待消息">×</button></div>`).join("")}</div><div class="row">${btn("attach", "plus", "添加附件", 'class="attach"')}<textarea class="grow" id="draft" rows="1" maxlength="32000" placeholder="发消息…">${E(s.draft)}</textarea>${s.busy ? btn("stop", "stop", "停止任务") : ""}<button class="primary send" data-action="send" aria-label="发送消息" ${s.uploading || !s.connected ? "disabled" : ""}>${icon("send")}</button></div>`;
+  el.innerHTML = `<div id="downloadBox"></div><div class="attachments">${s.attachments.map((a, i) => `<span class="pill">${E(a.name)}<button data-action="removeAttachment" data-index="${i}" aria-label="移除附件">×</button></span>`).join("")}</div><div id="queueBox">${s.queue.map((q) => `<div class="queued row"><div class="grow"><div class="ellipsis">${E(q.displayText || q.text || "附件消息")}</div><small>${E(q.error || "等待当前任务完成")}</small></div><button data-action="steer" data-id="${E(q.id)}" ${q.editable === false ? "disabled" : ""}>↪ 引导</button><button data-action="removeQueued" data-id="${E(q.id)}" aria-label="删除等待消息">×</button></div>`).join("")}</div><div class="row">${btn("attach", "plus", "添加附件", 'class="attach"')}<textarea class="grow" id="draft" rows="1" maxlength="32000" placeholder="发消息…">${E(s.draft)}</textarea>${btn("effort", "effort", "调整思考强度", !s.connected || !s.writable ? "disabled" : "")}${s.busy ? btn("stop", "stop", "停止任务") : ""}<button class="primary send" data-action="send" aria-label="发送消息" ${s.uploading || (effortPanel == null ? void 0 : effortPanel.busy) || !s.connected ? "disabled" : ""}>${icon("send")}</button></div>`;
   $("#draft").oninput = (e) => {
     s.draft = e.target.value;
     e.target.style.height = "auto";
@@ -524,7 +531,7 @@ async function refreshQueue() {
 }
 async function send() {
   var _a;
-  if (s.uploading || !s.draft.trim() && !s.attachments.length) return;
+  if ((effortPanel == null ? void 0 : effortPanel.busy) || s.uploading || !s.draft.trim() && !s.attachments.length) return;
   const text = s.draft, attachments = s.attachments.slice(), id = Core.uuid(), thread = s.thread.id;
   s.draft = "";
   s.attachments = [];
@@ -672,8 +679,8 @@ function renderSettings() {
   });
 }
 function aiFields() {
-  var _a, _b, _c;
-  return { address: ((_a = $("#page [name=address]")) == null ? void 0 : _a.value.trim()) || "", apiKey: ((_b = $("#page [name=apiKey]")) == null ? void 0 : _b.value.trim()) || "", model: ((_c = $("#aiModel")) == null ? void 0 : _c.value) || "" };
+  var _a, _b2, _c;
+  return { address: ((_a = $("#page [name=address]")) == null ? void 0 : _a.value.trim()) || "", apiKey: ((_b2 = $("#page [name=apiKey]")) == null ? void 0 : _b2.value.trim()) || "", model: ((_c = $("#aiModel")) == null ? void 0 : _c.value) || "" };
 }
 async function fetchModels() {
   const generation = ++modelGeneration;
@@ -699,7 +706,7 @@ function renderAI() {
   showPage(`<p class="hint">${E(((_a = s.boot.ai) == null ? void 0 : _a.model) || "请先在设置配置 AI")} · 执行服务器命令前会显示命令，等你确认。</p><div id="aiHistory">${s.aiMessages.filter((m) => m.role === "user" || m.role === "assistant").filter((m) => m.content).map((m) => `<article class="message ${m.role === "user" ? "user" : ""}"><div class="${m.role === "user" ? "bubble" : ""}">${markdown(m.content)}</div></article>`).join("")}</div><div class="aioutput" id="aiOutput">${E(s.aiText)}</div><div class="card">${area("aiInput", "消息，例如：帮我检查并安装 OpenClaw")}<button class="primary" data-action="aiSend" ${s.aiBusy ? "disabled" : ""}>${s.aiBusy ? "正在处理…" : "发送"}</button></div>`);
 }
 async function aiSend() {
-  var _a, _b;
+  var _a, _b2;
   if (s.aiBusy) return;
   if (!((_a = s.boot.ai) == null ? void 0 : _a.model)) {
     s.tab = "settings";
@@ -719,7 +726,7 @@ async function aiSend() {
       s.aiText = "";
       const r = await call("aiChat", { messages: s.aiMessages });
       s.aiMessages.push(r);
-      if (!((_b = r.tool_calls) == null ? void 0 : _b.length)) break;
+      if (!((_b2 = r.tool_calls) == null ? void 0 : _b2.length)) break;
       for (const t of r.tool_calls) {
         let args;
         try {
@@ -770,7 +777,7 @@ async function clawHistory() {
   renderClaw();
 }
 window.nativeEvent = (event) => {
-  var _a, _b;
+  var _a, _b2;
   if (event.event === "pairLink") {
     safe(() => pair(event.uri));
     return;
@@ -812,7 +819,7 @@ window.nativeEvent = (event) => {
     if (s.device) safe(s.connected ? refresh : reconnect);
     return;
   }
-  if (event.threadId && event.threadId !== ((_b = s.thread) == null ? void 0 : _b.id)) return;
+  if (event.threadId && event.threadId !== ((_b2 = s.thread) == null ? void 0 : _b2.id)) return;
   if (event.event === "timeline") {
     const wasBusy = s.busy;
     s.messages = Core.merge(s.messages, event.messages || []);
@@ -822,6 +829,7 @@ window.nativeEvent = (event) => {
     s.questions = event.questions || [];
     s.awaitingApproval = event.awaitingApproval;
     if (event.model) s.model = event.model;
+    if (event.reasoningEffort) s.effort = event.reasoningEffort;
     if (wasBusy && !s.busy) safe(refreshQueue);
     scheduleChat();
   }
@@ -875,6 +883,10 @@ async function reconnect() {
   }
 }
 window.goBack = () => {
+  if (effortPanel) {
+    if (!effortPanel.busy) closeEffort();
+    return;
+  }
   if (!$("#preview").hidden) {
     $("#preview").hidden = true;
     return;
@@ -933,7 +945,7 @@ document.addEventListener("click", (e) => {
   safe(() => action(b.dataset.action, b));
 });
 async function action(a, b) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
+  var _a, _b2, _c, _d, _e, _f, _g, _h, _i, _j, _k;
   switch (a) {
     case "servicesHome":
       s.tab = "services";
@@ -959,7 +971,7 @@ async function action(a, b) {
       break;
     }
     case "copyNode":
-      await call("copy", { text: ((_b = s.zeroTier) == null ? void 0 : _b.nodeID) || "" });
+      await call("copy", { text: ((_b2 = s.zeroTier) == null ? void 0 : _b2.nodeID) || "" });
       toast("节点 ID 已复制");
       break;
     case "ztLicense":
@@ -1089,7 +1101,18 @@ async function action(a, b) {
       await showQuota(b.dataset.id);
       break;
     case "models":
+      closeEffort();
       await modelPicker();
+      break;
+    case "effort":
+      await openEffort();
+      break;
+    case "closeEffort":
+      if (!(effortPanel == null ? void 0 : effortPanel.busy)) closeEffort();
+      break;
+    case "retryEffort":
+      closeEffort();
+      await openEffort();
       break;
     case "copyReply": {
       const g = Core.groups(s.messages).find((g2) => g2.key === b.dataset.id);
@@ -1384,8 +1407,8 @@ document.addEventListener("change", (e) => {
 });
 const SKIPPED_ANSWER = "用户跳过此问题，未提供答案。";
 function questionKey(g) {
-  var _a, _b;
-  return ((_a = s.device) == null ? void 0 : _a.hostId) + "|" + ((_b = s.thread) == null ? void 0 : _b.id) + "|" + g.id;
+  var _a, _b2;
+  return ((_a = s.device) == null ? void 0 : _a.hostId) + "|" + ((_b2 = s.thread) == null ? void 0 : _b2.id) + "|" + g.id;
 }
 function questionRecord(g) {
   var _a;
@@ -1396,7 +1419,7 @@ function renderQuestions() {
   const el = $("#questions");
   if (!el) return;
   el.innerHTML = s.questions.map((g) => {
-    var _a, _b, _c;
+    var _a, _b2, _c;
     const key = questionKey(g), state = questionRecord(g);
     (_a = s.qstates) != null ? _a : s.qstates = {};
     if (!s.qstates[key]) {
@@ -1414,19 +1437,19 @@ function renderQuestions() {
         renderQuestions();
       });
     }
-    const locked = ((_b = s.qstates[key]) == null ? void 0 : _b.loading) || state.sending || ["unknown", "accepted"].includes(state.state), answers = ((_c = s.answers) == null ? void 0 : _c[g.id]) || {};
+    const locked = ((_b2 = s.qstates[key]) == null ? void 0 : _b2.loading) || state.sending || ["unknown", "accepted"].includes(state.state), answers = ((_c = s.answers) == null ? void 0 : _c[g.id]) || {};
     return `<div class="questions" data-group="${E(g.id)}"><strong>需要你的回答</strong>${g.questions.map((q, i) => {
       var _a2;
       return `<p>${E(q.title)}</p>${q.options.map((o) => `<button class="questionoption ${answers[q.id] === o.label ? "selected" : ""}" data-action="answerOption" data-question="${i}" data-value="${E(o.label)}" ${locked ? "disabled" : ""}>${answers[q.id] === o.label ? "●" : "○"} ${E(o.label)}${o.description ? `<small>${E(o.description)}</small>` : ""}</button>`).join("")}<div class="row questiontools"><button data-action="customAnswer" data-question="${i}" ${locked ? "disabled" : ""}>自定义回答</button><button data-action="skipAnswer" data-question="${i}" ${locked ? "disabled" : ""}>${answers[q.id] === SKIPPED_ANSWER ? "已跳过 · 撤销" : "跳过此题"}</button></div><input type="${q.secret ? "password" : "text"}" data-answer="${i}" placeholder="填写回答" value="${E(answers[q.id] || "")}" ${locked ? "disabled" : ""} ${q.options.length && !((_a2 = s.customAnswers) == null ? void 0 : _a2.has(key + "|" + i)) ? "hidden" : ""}>`;
     }).join("")}<p class="hint">${E(state.error || (!s.connected ? "电脑未连接" : state.state === "accepted" ? "已提交到电脑原对话" : state.state === "unknown" ? "送达待确认，核实状态不会重复发送" : "选择、填写回答，或跳过暂不回答的问题"))}</p>${state.state === "accepted" ? "" : `<div class="row questiontools">${state.state === "unknown" ? `<button class="primary" data-action="answerStatus" data-group="${E(g.id)}" ${state.sending || !s.connected ? "disabled" : ""}>核实提交状态</button>` : `<button data-action="skipAllAnswers" data-group="${E(g.id)}" ${locked || !s.connected ? "disabled" : ""}>跳过全部</button><button class="primary" data-action="answer" data-group="${E(g.id)}" ${locked || !s.connected || g.questions.some((q) => !(answers[q.id] || "").trim()) ? "disabled" : ""}>提交回答</button>`}</div>`}</div>`;
   }).join("") + (s.awaitingApproval ? '<p class="hint">电脑权限审批需在桌面确认。</p>' : "");
   el.oninput = (e) => {
-    var _a, _b, _c, _d;
+    var _a, _b2, _c, _d;
     const box = e.target.closest("[data-group]");
     if (!box || !e.target.hasAttribute("data-answer")) return;
     const g = s.questions.find((g2) => g2.id === box.dataset.group);
     (_a = s.answers) != null ? _a : s.answers = {};
-    (_d = (_b = s.answers)[_c = g.id]) != null ? _d : _b[_c] = {};
+    (_d = (_b2 = s.answers)[_c = g.id]) != null ? _d : _b2[_c] = {};
     s.answers[g.id][g.questions[+e.target.dataset.answer].id] = e.target.value;
     const button = box.querySelector("[data-action=answer]");
     if (button) button.disabled = !s.connected || g.questions.some((q) => !(s.answers[g.id][q.id] || "").trim());
@@ -1470,7 +1493,7 @@ async function chooseDownload(params) {
   if (v) await call("download", { ...params, direct: v.__choice === "direct" });
 }
 async function hostWeb(address = "http://localhost:3000") {
-  var _a, _b;
+  var _a, _b2;
   const v = await modal("主机网页服务", `<label>已配对电脑</label><select name="device">${s.boot.devices.map((d) => {
     var _a2;
     return `<option value="${E(d.hostId)}" ${((_a2 = s.device) == null ? void 0 : _a2.hostId) === d.hostId ? "selected" : ""}>${E(deviceName(d))}</option>`;
@@ -1482,46 +1505,191 @@ async function hostWeb(address = "http://localhost:3000") {
   if (((_a = s.device) == null ? void 0 : _a.hostId) !== v.device || !s.connected) await connect(v.device);
   if (v.__choice === "direct" && !v.host) {
     const n = await rpc("networkInfo");
-    v.host = ((_b = n.zeroTierAddresses) == null ? void 0 : _b[0]) || "";
+    v.host = ((_b2 = n.zeroTierAddresses) == null ? void 0 : _b2[0]) || "";
   }
   if (v.__choice === "direct" && !v.host) throw Error("电脑未报告 ZeroTier IP，请手动填写");
   s.hostIP = v.host;
   await call("hostWeb", { url: v.url, direct: v.__choice === "direct", host: v.host });
 }
 async function modelPicker() {
-  var _a;
-  const r = await rpc("models", { threadId: s.thread.id });
-  const promise = modal("模型与推理", `<label>当前模型</label><select name="model">${r.models.map((m) => {
-    var _a2;
-    return `<option value="${E(m.id)}" ${m.id === ((_a2 = r.current) == null ? void 0 : _a2.model) ? "selected" : ""}>${E(m.name || m.id)}</option>`;
-  }).join("")}</select><label>推理强度</label><select name="effort"></select><p class="hint">仅列出模型支持的档位。运行期间切换会用于后续轮次。</p>`);
-  const update = () => {
-    const m = r.models.find((m2) => m2.id === $("#modal [name=model]").value);
-    $("#modal [name=effort]").innerHTML = ((m == null ? void 0 : m.efforts) || []).map((e) => {
-      var _a2;
-      return `<option value="${E(e.reasoningEffort)}" ${e.reasoningEffort === (((_a2 = r.current) == null ? void 0 : _a2.model) === m.id ? r.current.reasoningEffort : m.defaultEffort) ? "selected" : ""}>${E({ low: "低", medium: "中", high: "高", xhigh: "更高", max: "最高", ultra: "极高" }[e.reasoningEffort] || e.reasoningEffort)} · ${E(e.reasoningEffort)}</option>`;
-    }).join("") || '<option value="">模型默认</option>';
-  };
-  $("#modal [name=model]").onchange = update;
-  update();
-  const v = await promise;
-  if (v) {
-    const result = await rpc("setModel", { threadId: s.thread.id, model: v.model, ...v.effort ? { effort: v.effort } : {} });
-    s.model = ((_a = result.current) == null ? void 0 : _a.model) || v.model;
+  var _a, _b2, _c, _d, _e, _f, _g, _h, _i, _j;
+  const thread = s.thread.id, host = s.device.hostId, r = await rpc("models", { threadId: thread });
+  if (((_a = s.thread) == null ? void 0 : _a.id) !== thread || ((_b2 = s.device) == null ? void 0 : _b2.hostId) !== host) return;
+  s.models = r.models || [];
+  s.model = (_c = r.current) == null ? void 0 : _c.model;
+  s.effort = ((_d = r.current) == null ? void 0 : _d.reasoningEffort) || "";
+  const v = await modal("选择模型", `<label>当前模型</label><select name="model">${s.models.map((m) => `<option value="${E(m.id)}" ${m.id === s.model ? "selected" : ""}>${E(m.name || m.id)}</option>`).join("")}</select><p class="hint">思考强度在输入框旁调整。新模型用于后续轮次。</p>`);
+  if (v && ((_e = s.thread) == null ? void 0 : _e.id) === thread && ((_f = s.device) == null ? void 0 : _f.hostId) === host) {
+    const result = await rpc("setModel", { threadId: thread, model: v.model });
+    if (((_g = s.thread) == null ? void 0 : _g.id) !== thread || ((_h = s.device) == null ? void 0 : _h.hostId) !== host) return;
+    s.model = ((_i = result.current) == null ? void 0 : _i.model) || v.model;
+    s.effort = ((_j = result.current) == null ? void 0 : _j.reasoningEffort) || "";
     renderStatus();
   }
 }
+let effortPanel = null;
+const effortTitle = (e) => ({ none: "不推理", minimal: "最少", low: "低", medium: "中", high: "高", xhigh: "更高", max: "最高", ultra: "极高" })[e] || e || "模型默认";
+function closeEffort() {
+  var _a;
+  effortPanel = null;
+  (_a = $("#effortPanel")) == null ? void 0 : _a.remove();
+  const send2 = $("#composer .send");
+  if (send2) send2.disabled = s.uploading || !s.connected;
+}
+function positionEffort() {
+  const p = $("#effortPanel");
+  if (p) {
+    const r = $("#composer").getBoundingClientRect();
+    p.style.bottom = Math.max(8, innerHeight - r.top + 8) + "px";
+  }
+}
+function renderEffort() {
+  var _a, _b2;
+  const p = effortPanel;
+  if (!p) return;
+  if (s.route !== "chat" || s.tab !== "codex" || ((_a = s.thread) == null ? void 0 : _a.id) !== p.thread || ((_b2 = s.device) == null ? void 0 : _b2.hostId) !== p.host) {
+    closeEffort();
+    return;
+  }
+  let box = $("#effortPanel");
+  if (!box) {
+    box = document.createElement("section");
+    box.id = "effortPanel";
+    document.body.append(box);
+  }
+  const send2 = $("#composer .send");
+  if (send2) send2.disabled = p.busy || s.uploading || !s.connected;
+  box.setAttribute("aria-label", "思考强度");
+  box.innerHTML = `<div class="row"><small class="grow">思考强度</small>${btn("closeEffort", "close", "关闭思考强度", p.busy ? "disabled" : "")}</div>${p.loading ? '<p class="hint">正在读取可用档位…</p>' : p.efforts.length ? `<strong id="effortValue">${E(effortTitle(p.efforts[p.index]))}</strong><div id="effortTrack" role="slider" tabindex="0" aria-label="思考强度" aria-valuemin="0" aria-valuemax="${p.efforts.length - 1}" aria-valuenow="${p.index}" aria-valuetext="${E(effortTitle(p.efforts[p.index]))}" aria-disabled="${!!p.busy}"><div class="effortFill"></div>${p.efforts.map((e, i) => `<i style="left:calc(24px + (100% - 48px) * ${i / Math.max(1, p.efforts.length - 1)})"></i>`).join("")}<span class="effortThumb"></span></div><p class="hint">${p.busy ? "正在同步到电脑…" : s.busy ? "下一轮生效" : "滑动或点选档位，下一条消息生效"}</p>` : '<p class="hint">当前模型未提供可调整的思考强度</p><button data-action="retryEffort">重新读取</button>'}${p.error ? `<p class="error">${E(p.error)}</p>` : ""}`;
+  const track = $("#effortTrack");
+  if (track) {
+    const update = (e) => {
+      const rect = track.getBoundingClientRect();
+      p.index = Math.max(0, Math.min(p.efforts.length - 1, Math.round((e.clientX - rect.left - 24) / Math.max(1, rect.width - 48) * (p.efforts.length - 1))));
+      paintEffort();
+    };
+    track.onpointerdown = (e) => {
+      if (p.busy || !s.connected) return;
+      e.preventDefault();
+      p.pointer = e.pointerId;
+      track.setPointerCapture(e.pointerId);
+      update(e);
+    };
+    track.onpointermove = (e) => {
+      if (p.pointer === e.pointerId) update(e);
+    };
+    track.onpointerup = (e) => {
+      if (p.pointer !== e.pointerId) return;
+      p.pointer = null;
+      safe(() => saveEffort(p));
+    };
+    track.onpointercancel = () => {
+      p.pointer = null;
+    };
+    track.onkeydown = (e) => {
+      if (p.busy || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+      e.preventDefault();
+      p.index = Math.max(0, Math.min(p.efforts.length - 1, p.index + (["ArrowRight", "ArrowUp"].includes(e.key) ? 1 : -1)));
+      paintEffort();
+      safe(() => saveEffort(p));
+    };
+  }
+  paintEffort();
+  positionEffort();
+}
+function paintEffort() {
+  const p = effortPanel, t = $("#effortTrack");
+  if (!p || !t) return;
+  const v = effortTitle(p.efforts[p.index]);
+  t.style.setProperty("--position", p.index / Math.max(1, p.efforts.length - 1));
+  t.setAttribute("aria-valuenow", p.index);
+  t.setAttribute("aria-valuetext", v);
+  $("#effortValue").textContent = v;
+}
+async function openEffort() {
+  var _a, _b2, _c, _d;
+  if (!s.connected || !s.writable || (effortPanel == null ? void 0 : effortPanel.busy)) return;
+  if (effortPanel && !effortPanel.error) {
+    closeEffort();
+    return;
+  }
+  const p = { thread: s.thread.id, host: s.device.hostId, loading: true, busy: false, efforts: [], index: 0 };
+  effortPanel = p;
+  renderEffort();
+  try {
+    const r = await rpc("models", { threadId: p.thread });
+    if (effortPanel !== p || ((_a = s.thread) == null ? void 0 : _a.id) !== p.thread || ((_b2 = s.device) == null ? void 0 : _b2.hostId) !== p.host) return;
+    s.models = r.models || [];
+    s.model = (_c = r.current) == null ? void 0 : _c.model;
+    s.effort = ((_d = r.current) == null ? void 0 : _d.reasoningEffort) || "";
+    p.model = s.model;
+    const m = s.models.find((m2) => m2.id === p.model);
+    p.efforts = [...new Set(((m == null ? void 0 : m.efforts) || []).map((e) => e.reasoningEffort).filter(Boolean))];
+    p.current = s.effort || (m == null ? void 0 : m.defaultEffort) || "";
+    p.index = Math.max(0, p.efforts.indexOf(p.current));
+  } catch (e) {
+    p.error = e.message;
+  } finally {
+    p.loading = false;
+    if (effortPanel === p) renderEffort();
+  }
+}
+async function saveEffort(p) {
+  var _a, _b2, _c, _d, _e, _f;
+  if (effortPanel !== p || p.busy || !s.connected || !s.writable) return;
+  if (((_a = s.thread) == null ? void 0 : _a.id) !== p.thread || ((_b2 = s.device) == null ? void 0 : _b2.hostId) !== p.host) {
+    closeEffort();
+    return;
+  }
+  if (s.model !== p.model) {
+    p.error = "模型已变更，请重新读取档位";
+    p.efforts = [];
+    renderEffort();
+    return;
+  }
+  const effort = p.efforts[p.index];
+  if (!effort) return;
+  if (effort === p.current) {
+    closeEffort();
+    return;
+  }
+  p.busy = true;
+  p.error = null;
+  renderEffort();
+  try {
+    const r = await rpc("setModel", { threadId: p.thread, model: p.model, effort });
+    if (effortPanel !== p || ((_c = s.thread) == null ? void 0 : _c.id) !== p.thread || ((_d = s.device) == null ? void 0 : _d.hostId) !== p.host) return;
+    s.model = ((_e = r.current) == null ? void 0 : _e.model) || p.model;
+    s.effort = ((_f = r.current) == null ? void 0 : _f.reasoningEffort) || effort;
+    closeEffort();
+    renderStatus();
+  } catch (e) {
+    p.error = "未能切换：" + e.message;
+  } finally {
+    p.busy = false;
+    if (effortPanel === p) renderEffort();
+  }
+}
+document.addEventListener("pointerdown", (e) => {
+  if (e.target.closest("[data-action=effort],#effortPanel")) {
+    if (!e.target.closest("#effortTrack")) e.preventDefault();
+    return;
+  }
+  if (effortPanel && !effortPanel.busy) closeEffort();
+});
+window.addEventListener("resize", positionEffort);
+(_b = window.visualViewport) == null ? void 0 : _b.addEventListener("resize", positionEffort);
 let previewSequence = 0, previewGallery = [], previewIndex = 0;
 const originalImages = /* @__PURE__ */ new Map();
 async function previewImage(photo, photos = [photo], index = 0) {
-  var _a, _b;
+  var _a, _b2;
   previewGallery = photos;
   previewIndex = index;
   const token = ++previewSequence;
   const frame = (content) => `<div class="imagewindow"><div class="row"><span class="grow ellipsis">${E(photo.name)}</span>${btn("closePreview", "close", "关闭图片")}</div>${content}${photos.length > 1 ? `<div class="row imagecontrols">${btn("previousImage", "back", "上一张", index === 0 ? "disabled" : "")}<small>${index + 1} / ${photos.length}</small><button data-action="nextImage" aria-label="下一张" ${index === photos.length - 1 ? "disabled" : ""}>›</button></div>` : ""}</div>`;
   $("#preview").hidden = false;
   $("#preview").innerHTML = frame("<p>正在读取原图…</p>");
-  const key = ((_a = s.device) == null ? void 0 : _a.hostId) + "|" + ((_b = s.thread) == null ? void 0 : _b.id) + "|" + photo.path;
+  const key = ((_a = s.device) == null ? void 0 : _a.hostId) + "|" + ((_b2 = s.thread) == null ? void 0 : _b2.id) + "|" + photo.path;
   if (!originalImages.has(key)) {
     originalImages.set(key, (async () => {
       const file = await call("download", { ...fileParams(photo.path), preview: true });
