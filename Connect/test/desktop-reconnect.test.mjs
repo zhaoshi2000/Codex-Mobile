@@ -8,6 +8,14 @@ function frame(value) {
   const b = Buffer.from(JSON.stringify(value)), h = Buffer.alloc(4);
   h.writeUInt32LE(b.length); return Buffer.concat([h, b]);
 }
+
+test('large fragmented snapshots and adjacent frames arrive intact and release their buffers', () => {
+  const ipc=new DesktopIPC(),seen=[];ipc.on('broadcast',m=>seen.push(m));
+  const first={type:'broadcast',method:'snapshot',text:'中'.repeat(1000000)};
+  const second={type:'broadcast',method:'next'};const data=Buffer.concat([frame(first),frame(second)]);
+  for(let i=0;i<data.length;i+=1031)ipc.read(data.subarray(i,i+1031));
+  assert.deepEqual(seen,[first,second]);assert.equal(ipc.bufferLength,0);assert.equal(ipc.buffer.length,0);
+});
 async function until(check) {
   const end = Date.now() + 3000;
   while (!check()) { assert.ok(Date.now() < end, 'condition timed out'); await sleep(10); }

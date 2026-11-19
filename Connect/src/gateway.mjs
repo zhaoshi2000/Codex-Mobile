@@ -43,6 +43,7 @@ export class Gateway {
     this.historyReads = new Map();
     this.historyCache = new Map();
     this.historyBudgetMs = 7000;
+    this.historyRefreshNeeded = new Set();
     if (desktopCatalog) {
       this.catalog = new DesktopCatalog({ rpc, codexHome });
       this.activity = new DesktopActivity({ rpc, ipc, catalog: this.catalog, onCompleted: (id, at) => { this.completedThreads[id] = at; this.completedThreadProjects[id] = this.activity.rows.get(id)?.projectId || null; this.saveNavigation().catch(() => {}); }, isNeeded: id => this.pendingQueued.has(id) || this.monitors.has(id) || [...this.subscribers.values()].some(s => s.threadId === id) });
@@ -70,7 +71,7 @@ export class Gateway {
     this.completedThreads = this.navigation.completed;
     this.completedThreadProjects = this.navigation.projects ||= {};
     this.ipc.on("broadcast", (m) => this.onBroadcast(m));
-    this.ipc.on("closed", () => { this.states.clear(); this.queued.clear(); for (const s of this.subscribers.values()) s.peer.emit?.({ event: "notice", message: "电脑通道重连中，请等待状态恢复" }); });
+    this.ipc.on("closed", () => { this.states.clear(); this.queued.clear(); this.historyRefreshNeeded.clear(); for (const s of this.subscribers.values()) s.peer.emit?.({ event: "notice", message: "电脑通道重连中，请等待状态恢复" }); });
     for (const id of this.pendingQueued.keys()) this.ipc.follow(id);
     this.leaseTimer = setInterval(
       () => this.cleanLeases().catch(() => {}),
@@ -799,6 +800,7 @@ export class Gateway {
         if (!this.activity?.followed.has(sub.threadId)) this.ipc.follow(sub.threadId, false);
       } catch {}
       this.states.delete(sub.threadId);
+      this.historyRefreshNeeded.delete(sub.threadId);
       clearTimeout(this.timers.get(sub.threadId));
       this.timers.delete(sub.threadId);
     }
@@ -859,13 +861,15 @@ export class Gateway {
           });
       return;
     }
-    const state = applyChange(this.states.get(id), m.params.change);
+    const previous = this.states.get(id);
+    const state = applyChange(previous, m.params.change);
     if (!state) {
       this.states.delete(id);
       this.ipc.follow(id);
       return;
     }
     this.states.set(id, state);
+    if (previous?.state.threadRuntimeStatus?.type === "active" && state.state.threadRuntimeStatus?.type === "idle") this.historyRefreshNeeded.add(id);
     this.historyCache.delete(JSON.stringify([id, null]));
     if (this.timers.has(id)) return;
     this.timers.set(
@@ -876,14 +880,15 @@ export class Gateway {
         if (!s) return;
         const turns = desktopTurns(s);
         await this.completeQueuedTurns(id, turns);
-        const groups = questionGroups(s, turns);
+        const subscribers = [...this.subscribers.values()].filter(x => x.threadId === id);
+        const groups = subscribers.length ? questionGroups(s, turns) : [];
         const active = turns.find((t) =>
           ["inProgress", "running", "active"].includes(t.status),
         );
         const event = {
           event: "timeline",
           threadId: id,
-          messages: messages(turns, 230000, true),
+          messages: subscribers.length ? messages(turns, 230000, true) : [],
           questions: groups.map(({ requestId, ...g }) => g),
           progress: progress(s),
           model: s.latestCollaborationMode?.settings?.model || s.latestModel || null,
@@ -906,7 +911,9 @@ export class Gateway {
           for (const x of this.subscribers.values()) if (x.peer.publicKey === record?.owner) x.peer.emit({ event: "completed", id: monitor.messageId, threadId: id, outcome: record.outcome });
           if (!this.pendingQueued.has(id) && !this.activity?.followed.has(id) && ![...this.subscribers.values()].some(x => x.threadId === id)) { this.ipc.follow(id, false); this.states.delete(id); }
         }
-        if (event.status === "idle") {
+        // Live patches already carry the current messages. Read persistence only
+        // once when a running turn ends, and only for a phone viewing this chat.
+        if (event.status === "idle" && this.historyRefreshNeeded.delete(id) && subscribers.length) {
           try {
             const page = await this.history(id);
             for (const x of this.subscribers.values())
@@ -933,6 +940,7 @@ export class Gateway {
     await this.uploads.close();
     for (const id of this.pendingQueued.keys()) { try { this.ipc.follow(id, false); } catch {} }
     this.pendingQueued.clear();
+    this.historyRefreshNeeded.clear();
     for (const id of this.monitors.keys()) { try { this.ipc.follow(id, false); } catch {} }
     this.monitors.clear();
     for (const id of [...this.subscribers.keys()]) this.unwatch(id);

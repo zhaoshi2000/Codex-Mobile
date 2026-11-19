@@ -3,12 +3,30 @@
 import net from "node:net";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+
+async function queuedImage(attachment) {
+  // Desktop uses src as a browser image URL, while localPath is the full image
+  // sent to the model. A Windows filesystem path is not a displayable URL.
+  let src;
+  try {
+    const { default: sharp } = await import("sharp");
+    const bytes = await sharp(attachment.path, { limitInputPixels: 40000000 })
+      .rotate().resize(320, 320, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 70 }).timeout({ seconds: 3 }).toBuffer();
+    src = "data:image/jpeg;base64," + bytes.toString("base64");
+  } catch {
+    // Preview failure must not discard a valid original attachment.
+    src = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="8" fill="#555"/><path d="M12 48l14-18 10 10 8-10 10 18z" fill="#ddd"/></svg>');
+  }
+  return { id: attachment.id || randomUUID(), src, previewSrc: src, localPath: attachment.path, filename: attachment.name };
+}
 export class DesktopIPC extends EventEmitter {
   constructor(socketPath = "\\\\.\\pipe\\codex-ipc", { retryMs = 3000, timeoutMs = 15000 } = {}) {
     super();
     this.path = socketPath;
     this.pending = new Map();
     this.buffer = Buffer.alloc(0);
+    this.bufferLength = 0;
     this.clientId = "initializing-client";
     this.followed = new Set();
     this.stopping = false;
@@ -27,6 +45,7 @@ export class DesktopIPC extends EventEmitter {
   }
   async open() {
     this.buffer = Buffer.alloc(0);
+    this.bufferLength = 0;
     this.clientId = "initializing-client";
     const socket = net.createConnection(this.path);
     this.socket = socket;
@@ -44,6 +63,7 @@ export class DesktopIPC extends EventEmitter {
       }
       this.pending.clear();
       this.buffer = Buffer.alloc(0);
+      this.bufferLength = 0;
       this.emit("closed");
       if (!this.stopping) {
         clearTimeout(this.retry);
@@ -88,16 +108,26 @@ export class DesktopIPC extends EventEmitter {
     this.socket?.destroy();
   }
   read(b) {
-    this.buffer = Buffer.concat([this.buffer, b]);
-    while (this.buffer.length >= 4) {
+    // Snapshots can be many MB, delivered in small pipe chunks. Repeated concat
+    // recopies the whole accumulated snapshot for every chunk (quadratic work).
+    const needed = this.bufferLength + b.length;
+    if (this.buffer.length < needed) {
+      const grown = Buffer.allocUnsafe(Math.max(needed, this.buffer.length * 2, 65536));
+      this.buffer.copy(grown, 0, 0, this.bufferLength);
+      this.buffer = grown;
+    }
+    b.copy(this.buffer, this.bufferLength);
+    this.bufferLength = needed;
+    while (this.bufferLength >= 4) {
       const size = this.buffer.readUInt32LE();
       if (size > 32 * 1024 * 1024) {
         this.reconnect("Codex 桌面同步数据超过 32 MB，正在重新连接");
         return;
       }
-      if (this.buffer.length < size + 4) return;
+      if (this.bufferLength < size + 4) return;
       const raw = this.buffer.subarray(4, 4 + size);
-      this.buffer = this.buffer.subarray(4 + size);
+      this.bufferLength -= size + 4;
+      this.buffer = this.bufferLength ? this.buffer.subarray(4 + size) : Buffer.alloc(0);
       let m;
       try {
         m = JSON.parse(raw);
@@ -213,11 +243,12 @@ export class DesktopIPC extends EventEmitter {
   // Reserve/complete inserts one native queued message without replacing other
   // Desktop windows' queue. Desktop persists it and owns automatic dispatch.
   async queue(threadId, text, messageId, attachments = [], cwd) {
+    const imageAttachments = await Promise.all(attachments.filter(a => a.image).map(queuedImage));
     const owner = await this.owner(threadId);
     const message = { id: messageId, text: text || "请查看附件", createdAt: Date.now(), acceptedAtMs: Date.now(), cwd,
       context: { prompt: text || "请查看附件", addedFiles: [], commentAttachments: [],
         fileAttachments: attachments.filter(a => !a.image).map(a => ({ label: a.name, path: a.path, fsPath: a.path })),
-        imageAttachments: attachments.filter(a => a.image).map(a => ({ src: a.path, localPath: a.path, filename: a.name })) } };
+        imageAttachments } };
     const write = value => this.request("thread-follower-set-queued-follow-ups-state", {
       conversationId: threadId, state: { [threadId]: [value] }, preparationMessageId: messageId,
     }, 3, owner);

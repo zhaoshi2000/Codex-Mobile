@@ -28,6 +28,31 @@ test('native queue reserve/complete does not replace existing Desktop messages a
   assert.ok(calls[0][1].state.thread[0].preparation);assert.equal(calls[1][1].state.thread[0].preparation,undefined);
   assert.equal(calls[1][1].state.thread[0].context.imageAttachments[0].localPath,'C:/photo.jpg');
   assert.equal(calls[1][1].state.thread[0].context.fileAttachments[0].path,'C:/note.md');
+  assert.match(calls[1][1].state.thread[0].context.imageAttachments[0].src,/^data:image\//);
+});
+
+test('queued image preview is a small decodable URL and model input retains the full original',async t=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'astro-queue-image-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ const{default:sharp}=await import('sharp');const image=path.join(dir,'手机 照片.jpg');
+ await sharp({create:{width:1200,height:800,channels:3,background:'#468'}}).jpeg().toFile(image);
+ const original=await fs.readFile(image),ipc=new DesktopIPC();ipc.owner=async()=> 'owner';let message;
+ ipc.request=async(_,p)=>{message=p.state.thread[0];return {result:{ok:true}};};
+ await ipc.queue('thread','continue','message',[{id:'photo-id',image:true,path:image,name:'手机 照片.jpg'}],dir);
+ const a=message.context.imageAttachments[0];assert.equal(a.localPath,image);assert.equal(a.id,'photo-id');assert.equal(a.src,a.previewSrc);
+ assert.match(a.src,/^data:image\/jpeg;base64,/);const bytes=Buffer.from(a.src.split(',')[1],'base64');const info=await sharp(bytes).metadata();
+ assert.ok(info.width<=320&&info.height<=320);assert.ok(bytes.length<100000);assert.deepEqual(await fs.readFile(image),original);
+});
+
+test('idle patches and offline completion do not rescan history; visible completion refreshes once',async t=>{
+ const{g,ipc,peer,id}=await fixture(t);let reads=0;g.history=async()=>{reads++;return {messages:[]};};
+ const snapshot=(status,revision)=>ipc.emit('broadcast',{method:'thread-stream-state-changed',version:13,params:{conversationId:id,change:{type:'snapshot',revision,conversationState:{threadRuntimeStatus:{type:status},turns:[]}}}});
+ const settle=()=>new Promise(r=>setTimeout(r,300));
+ g.subscribers.set(peer.id,{threadId:id,peer:{...peer,emit(){}}});
+ snapshot('idle',1);await settle();snapshot('idle',2);await settle();assert.equal(reads,0);
+ snapshot('active',3);snapshot('idle',4);await settle();assert.equal(reads,1);
+ snapshot('idle',5);await settle();assert.equal(reads,1);
+ g.subscribers.clear();g.monitors.set(id,{messageId:'tracked',active:false});
+ snapshot('active',6);snapshot('idle',7);await settle();assert.equal(reads,1);
 });
 
 test('Desktop model/steer routes preserve attachments and only update model/effort',async()=>{const ipc=new DesktopIPC();ipc.owner=async()=> 'owner';let captured;ipc.request=async(method,params,version,owner)=>{captured={method,params,version,owner};return{result:method.includes('read-model')?{settings:{model:'model-b'}}:{applied:true}}};await ipc.steer('thread','hello','message',[{image:true,path:'C:/image.jpg'},{image:false,path:'C:/note.md',name:'note.md'}]);assert.equal(captured.version,1);assert.equal(captured.params.input[1].type,'localImage');assert.equal(captured.params.input[2].type,'mention');let update;ipc.request=async(method,params,version)=>{if(method.includes('update-thread')){update={params,version};return{result:{applied:true}}}return{result:{settings:{model:'model-b'}}}};assert.equal((await ipc.setModel('thread','model-b','high')).model,'model-b');assert.deepEqual(update.params.threadSettings,{model:'model-b',effort:'high'});assert.equal(update.version,2);});
