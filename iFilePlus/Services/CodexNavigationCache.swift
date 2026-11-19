@@ -1,6 +1,27 @@
 import Foundation
 import Combine
 
+// A chat connection survives cancellation of the SwiftUI task waiting for it.
+@MainActor
+final class CodexChatSelection {
+    private var task: Task<Void, Never>?
+    private var thread: String?
+    private var token = UUID()
+    var isRunning: Bool { task != nil }
+    func isCurrent(_ value: UUID, threadID: String) -> Bool { token == value && thread == threadID }
+    func run(_ threadID: String, operation: @escaping @MainActor (UUID) async -> Void) async {
+        if thread == threadID, let task { await task.value; return }
+        cancel()
+        thread = threadID
+        let current = token
+        let work = Task { await operation(current) }
+        task = work
+        await work.value
+        if token == current { task = nil }
+    }
+    func cancel() { token = UUID(); task?.cancel(); task = nil; thread = nil }
+}
+
 struct CodexRow: Identifiable, Hashable {
     let id: String
     let title: String

@@ -2,6 +2,62 @@ import XCTest
 @testable import FileServices
 
 final class FileServicesTests: XCTestCase {
+    @MainActor
+    func testChatSelectionSurvivesCancelledViewWaiterAndCoalescesReentry() async throws {
+        let selection = CodexChatSelection()
+        var starts = 0, ready = false
+        var gate: CheckedContinuation<Void, Never>?
+        let waiter = Task { await selection.run("chat") { token in
+            starts += 1
+            await withCheckedContinuation { gate = $0 }
+            if selection.isCurrent(token, threadID: "chat") && !Task.isCancelled { ready = true }
+        } }
+        while gate == nil { await Task.yield() }
+        waiter.cancel()
+        let reopened = Task { await selection.run("chat") { _ in starts += 1 } }
+        await Task.yield()
+        gate?.resume()
+        await waiter.value; await reopened.value
+        XCTAssertTrue(ready, "Cancelling the page must not strand the send button disabled")
+        XCTAssertEqual(starts, 1)
+        XCTAssertFalse(selection.isRunning)
+    }
+
+    @MainActor
+    func testChatSelectionDiscardsLateFailureAfterSwitchingChats() async throws {
+        let selection = CodexChatSelection()
+        var oldGate: CheckedContinuation<Void, Never>?, newGate: CheckedContinuation<Void, Never>?
+        var visible = ""
+        let old = Task { await selection.run("old") { token in
+            await withCheckedContinuation { oldGate = $0 }
+            if selection.isCurrent(token, threadID: "old") { visible = "CancellationError" }
+        } }
+        while oldGate == nil { await Task.yield() }
+        let next = Task { await selection.run("new") { token in
+            await withCheckedContinuation { newGate = $0 }
+            if selection.isCurrent(token, threadID: "new") { visible = "ready" }
+        } }
+        while newGate == nil { await Task.yield() }
+        oldGate?.resume(); await old.value
+        XCTAssertEqual(visible, "")
+        XCTAssertTrue(selection.isRunning, "Old completion must not clear the new connection task")
+        newGate?.resume(); await next.value
+        XCTAssertEqual(visible, "ready")
+    }
+
+    @MainActor
+    func testLeavingChatInvalidatesItsPendingSelection() async {
+        let selection = CodexChatSelection()
+        var gate: CheckedContinuation<Void, Never>?, applied = false
+        let task = Task { await selection.run("chat") { token in
+            await withCheckedContinuation { gate = $0 }
+            applied = selection.isCurrent(token, threadID: "chat")
+        } }
+        while gate == nil { await Task.yield() }
+        selection.cancel(); gate?.resume(); await task.value
+        XCTAssertFalse(applied); XCTAssertFalse(selection.isRunning)
+    }
+
     func testPreviewCacheReopensOriginalAndSurvivesNewCacheInstance() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

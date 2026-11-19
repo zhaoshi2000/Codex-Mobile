@@ -490,8 +490,10 @@ private struct CodexChatContent: View {
                 if let error = service.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
                 if let failure = service.taskFailure { Text(failure).font(.caption).foregroundStyle(.red).lineLimit(4).textSelection(.enabled) }
                 if !service.writable {
-                    Button("在电脑打开此对话") { Task { do { _ = try await service.request("activate", ["threadId": thread.id]); try? await Task.sleep(for: .seconds(2)); await service.select(thread.id) } catch { service.error = error.localizedDescription } } }
-                        .font(.footnote).disabled(!service.connected)
+                    Button { Task { await service.select(thread.id) } } label: {
+                        HStack { if service.selecting { ProgressView() }; Text(service.selecting ? "正在连接对话…" : "重新连接对话") }
+                    }.disabled(service.selecting)
+                        .font(.footnote)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal).padding(.vertical, 8)
             GeometryReader { viewport in
@@ -614,10 +616,10 @@ private struct CodexChatContent: View {
                 pendingID = id; pendingText = text; draft = text; uncertain = true; uploadedIDs = value["attachments"] as? [String] ?? []
             }
             if let savedDraft = UserDefaults.standard.string(forKey: draftAccount), !uncertain { draft = savedDraft }
-            if service.selectedThread != thread.id { await service.select(thread.id) }
-            if service.writable { await service.refreshModels(thread.id) }
+            await service.ensureSelected(thread.id)
             while !Task.isCancelled {
                 if scenePhase == .active {
+                    await service.ensureSelected(thread.id)
                     await service.refreshActivity()
                     if bottomDistance < 140 && !browsingOlder && !navigationOpen && !modelsOpen && !effortOpen && preview == nil { await service.markRead(thread.id) }
                 }

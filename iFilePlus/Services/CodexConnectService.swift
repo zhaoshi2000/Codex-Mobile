@@ -144,7 +144,8 @@ extension Data {
     static func resumeAll() { for s in sessions.values { Task { await s.resumeConnection() } } }
     static func remove(_ id: String) { sessions.removeValue(forKey: id)?.disconnect() }
     private var optimistic: [String: (thread: String, text: String, bubble: CodexChatMessage, baseline: Set<String>)] = [:]
-    private var selection = UUID()
+    private let chatSelection = CodexChatSelection()
+    @Published private(set) var selecting = false
     @Published var device: CodexDevice
     private var socket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
@@ -205,7 +206,7 @@ extension Data {
                     } catch { if let self, self.generation == current { self.fail("连接断开：\(error.localizedDescription)。请重连；未确认的消息不要重复发送。") } }
                 }
             }
-            if let thread = selectedThread { await select(thread, activate: false) }
+            if let thread = selectedThread, !chatSelection.isRunning { await select(thread, activate: false) }
             await checkCompletions(); startHeartbeat()
         } catch { if generation == attempt { fail(error.localizedDescription) } }
     }
@@ -236,6 +237,7 @@ extension Data {
         } catch { activityError = "任务状态暂不可用：" + error.localizedDescription }
     }
     func disconnect() {
+        chatSelection.cancel(); selecting = false
         wantsConnection = false; reconnectTask?.cancel(); reconnectTask = nil
         disconnectTransport()
     }
@@ -338,7 +340,9 @@ extension Data {
             }
         case "completed":
             if let id = value["id"] as? String { completion(id, threadID: value["threadId"] as? String, outcome: value["outcome"] as? [String: Any]) }
-        case "notice": error = value["message"] as? String
+        case "notice":
+            error = value["message"] as? String
+            if error?.hasPrefix("电脑通道重连中") == true { writable = false; notice = nil }
         default: break
         }
     }
@@ -382,35 +386,60 @@ extension Data {
         messages = updated
     }
     func select(_ threadID: String, activate: Bool = true) async {
+        await chatSelection.run(threadID) { [weak self] token in
+            await self?.loadSelection(threadID, activate: activate, token: token)
+        }
+    }
+    func ensureSelected(_ threadID: String) async {
+        guard !Task.isCancelled else { return }
+        if selectedThread != threadID { await select(threadID); return }
+        if !writable { await select(threadID, activate: false) }
+        else if models.isEmpty { await refreshModels(threadID) }
+    }
+    private func loadSelection(_ threadID: String, activate: Bool, token: UUID) async {
+        func current() -> Bool { chatSelection.isCurrent(token, threadID: threadID) && !Task.isCancelled }
+        guard current() else { return }
+        selecting = true
+        defer { if chatSelection.isCurrent(token, threadID: threadID) { selecting = false } }
         let retainVisibleMessages = selectedThread == threadID && !showingOlder
         taskFailure = nil; modelEfforts = [:]; modelDefaultEfforts = [:]
-        selection = UUID(); let token = selection
         writable = false
-        if !connected { await connect(); if selectedThread == threadID { return } }
         running = false; notice = nil; questions = []; queuedMessages = []; progressLabel = ""; progressSteps = []; currentModel = ""; currentEffort = ""; models = []; selectedThread = threadID; showingOlder = false; olderCursor = nil; turnID = nil; approvalNeeded = false; error = nil
         if !retainVisibleMessages { messages = [] }
+        if !connected { await connect() }
+        guard current(), connected else { return }
+        let transport = generation
         do {
             let page = try await request("history", ["threadId": threadID])
-            guard selectedThread == threadID, selection == token else { return }
+            guard current(), generation == transport else { return }
             merge(page["messages"] as? [[String: Any]] ?? [], history: true); olderCursor = page["nextCursor"] as? String
-            applyOutcome(page["outcome"] as? [String: Any])
+            if !running { applyOutcome(page["outcome"] as? [String: Any]) }
             var result = try await request("watch", ["threadId": threadID])
+            guard current(), generation == transport else { return }
             if activate && result["writable"] as? Bool != true {
                 status = "正在打开电脑原对话…"
                 _ = try await request("activate", ["threadId": threadID])
                 for _ in 0..<8 {
                     try await Task.sleep(for: .seconds(1))
-                    guard selection == token else { return }
+                    guard current(), generation == transport else { return }
                     result = try await request("watch", ["threadId": threadID])
+                    guard current(), generation == transport else { return }
                     if result["writable"] as? Bool == true { break }
                 }
             }
-            guard selection == token else { return }
+            guard current(), generation == transport else { return }
             writable = result["writable"] as? Bool ?? false; status = result["message"] as? String ?? "已连接"
+            if writable { error = nil; await refreshModels(threadID) }
+            guard current(), generation == transport else { return }
             await refreshQueue(threadID)
-        } catch { self.error = error.localizedDescription }
+        } catch is CancellationError {
+            // Leaving or replacing a chat is not a connection failure.
+        } catch {
+            guard current(), generation == transport else { return }
+            self.error = "对话连接暂未就绪：" + error.localizedDescription + "。可点“重新连接对话”重试。"
+        }
     }
-    func leaveChat(_ expectedID: String? = nil) { if let expectedID, selectedThread != expectedID { return }; let leaving = selectedThread; selection = UUID(); selectedThread = nil; messages = []; queuedMessages = []; olderCursor = nil; writable = false; running = false; Task { if let leaving { _ = try? await request("unwatch", ["threadId": leaving]) } } }
+    func leaveChat(_ expectedID: String? = nil) { if let expectedID, selectedThread != expectedID { return }; let leaving = selectedThread; chatSelection.cancel(); selecting = false; selectedThread = nil; messages = []; queuedMessages = []; olderCursor = nil; writable = false; running = false; Task { if let leaving, selectedThread != leaving { _ = try? await request("unwatch", ["threadId": leaving]) } } }
     func older(_ threadID: String) async {
         guard let cursor = olderCursor else { return }
         showingOlder = true
@@ -445,8 +474,9 @@ extension Data {
         } catch { updateDelivery(messageID, "送达待确认"); throw error }
     }
     func refreshQueue(_ threadID: String) async {
-        do { let result = try await request("queued", ["threadId": threadID]); if selectedThread == threadID { queuedMessages = (result["messages"] as? [[String: Any]] ?? []).compactMap(CodexQueuedMessage.init).filter { !steeringMessages.contains($0.id) } } }
-        catch { self.error = error.localizedDescription }
+        let transport = generation
+        do { let result = try await request("queued", ["threadId": threadID]); if selectedThread == threadID, generation == transport, !Task.isCancelled { queuedMessages = (result["messages"] as? [[String: Any]] ?? []).compactMap(CodexQueuedMessage.init).filter { !steeringMessages.contains($0.id) } } }
+        catch { if selectedThread == threadID, generation == transport, !Task.isCancelled, !(error is CancellationError) { self.error = error.localizedDescription } }
     }
     func changeQueued(_ messageID: String, threadID: String, steer: Bool) async throws {
         if steer { steeringMessages.insert(messageID) }
@@ -546,9 +576,10 @@ extension Data {
         if (try? await request("markRead", ["threadId": threadID])) != nil { unreadThreads.remove(threadID) }
     }
     func refreshModels(_ threadID: String) async {
+        let transport = generation
         do {
             let result = try await request("models", ["threadId": threadID])
-            guard selectedThread == threadID else { return }
+            guard selectedThread == threadID, generation == transport, !Task.isCancelled else { return }
             let current = result["current"] as? [String: Any] ?? [:]
             currentModel = current["model"] as? String ?? ""; currentEffort = current["reasoningEffort"] as? String ?? ""
             models = (result["models"] as? [[String: Any]] ?? []).compactMap { m in guard let id = m["id"] as? String else { return nil }; return CodexRow(id: id, title: m["name"] as? String ?? id) }
@@ -558,7 +589,7 @@ extension Data {
                 modelEfforts[id] = (model["efforts"] as? [[String: Any]] ?? []).compactMap { $0["reasoningEffort"] as? String }
                 modelDefaultEfforts[id] = model["defaultEffort"] as? String
             }
-        } catch { self.error = error.localizedDescription }
+        } catch { if selectedThread == threadID, generation == transport, !Task.isCancelled, !(error is CancellationError) { self.error = error.localizedDescription } }
     }
     func chooseModel(_ model: String, threadID: String, effort: String? = nil) async throws {
         var params: [String: Any] = ["threadId": threadID, "model": model]
