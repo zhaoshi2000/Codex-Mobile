@@ -266,6 +266,9 @@ if (
       }
       await saveJSON(path.join(stateDir, "connection-status.json"), {
         relayConnected: bridge.ws?.readyState === WebSocket.OPEN,
+        desktopConnected: ipc.connected,
+        desktopReconnecting: !ipc.connected && !ipc.stopping,
+        desktopError: ipc.lastError,
         trustedPhones: bridge.device.trusted.length,
         connectedPhones: bridge.peers.size,
         updatedAt: Date.now(),

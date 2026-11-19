@@ -4,7 +4,7 @@ import net from "node:net";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 export class DesktopIPC extends EventEmitter {
-  constructor(socketPath = "\\\\.\\pipe\\codex-ipc") {
+  constructor(socketPath = "\\\\.\\pipe\\codex-ipc", { retryMs = 3000, timeoutMs = 15000 } = {}) {
     super();
     this.path = socketPath;
     this.pending = new Map();
@@ -13,46 +13,86 @@ export class DesktopIPC extends EventEmitter {
     this.followed = new Set();
     this.stopping = false;
     this.connected = false;
+    this.retryMs = retryMs;
+    this.timeoutMs = timeoutMs;
+    this.lastError = null;
   }
-  async connect() {
+  connect() {
+    if (this.stopping) return Promise.reject(new Error("桌面通道已关闭"));
+    if (this.connecting) return this.connecting;
+    if (this.connected) return Promise.resolve();
+    clearTimeout(this.retry);
+    this.connecting = this.open().finally(() => { this.connecting = null; });
+    return this.connecting;
+  }
+  async open() {
     this.buffer = Buffer.alloc(0);
     this.clientId = "initializing-client";
-    await new Promise((resolve, reject) => {
-      this.socket = net.createConnection(this.path);
-      this.socket.once("connect", resolve);
-      this.socket.once("error", reject);
-      this.socket.on("error", () => {});
-      this.socket.on("data", (b) => this.read(b));
-      this.socket.on("close", () => {
-        this.connected = false;
-        for (const p of this.pending.values()) {
-          clearTimeout(p.timer);
-          p.reject(new Error("桌面通道已断开"));
-        }
-        this.pending.clear();
-        this.emit("closed");
-        if (!this.stopping) {
-          clearTimeout(this.retry);
-          this.retry = setTimeout(() => this.connect().catch(() => {}), 3000);
-        }
-      });
+    const socket = net.createConnection(this.path);
+    this.socket = socket;
+    socket.on("error", error => {
+      if (this.socket === socket) this.lastError = "Codex 桌面通道错误：" + (error.code || "连接中断");
     });
-    const r = await this.request(
-      "initialize",
-      { clientType: "ifileplus-connect" },
-      1,
-    );
-    this.clientId = r.result.clientId;
-    this.connected = true;
-    for (const id of this.followed) this.follow(id);
-    this.emit("connected");
+    socket.on("data", b => { if (this.socket === socket) this.read(b); });
+    socket.on("close", () => {
+      if (this.socket !== socket) return;
+      this.connected = false;
+      if (!this.stopping && !this.lastError) this.lastError = "Codex 桌面通道已断开，正在重新连接";
+      for (const p of this.pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(new Error("桌面通道已断开"));
+      }
+      this.pending.clear();
+      this.buffer = Buffer.alloc(0);
+      this.emit("closed");
+      if (!this.stopping) {
+        clearTimeout(this.retry);
+        this.retry = setTimeout(() => this.connect().catch(() => {}), this.retryMs);
+      }
+    });
+    try {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => socket.destroy(new Error("Codex 桌面连接超时")), this.timeoutMs);
+        const finish = error => {
+          clearTimeout(timer);
+          socket.off("connect", onConnect); socket.off("error", onError); socket.off("close", onClose);
+          error ? reject(error) : resolve();
+        };
+        const onConnect = () => finish();
+        const onError = error => finish(error);
+        const onClose = () => finish(new Error("桌面通道已断开"));
+        socket.once("connect", onConnect); socket.once("error", onError); socket.once("close", onClose);
+      });
+      const r = await this.request(
+        "initialize",
+        { clientType: "ifileplus-connect" },
+        1,
+      );
+      if (typeof r.result?.clientId !== "string" || !r.result.clientId) throw new Error("Codex 桌面握手响应无效");
+      if (this.stopping || socket.destroyed) throw new Error("桌面通道已断开");
+      this.clientId = r.result.clientId;
+      this.connected = true;
+      this.lastError = null;
+      for (const id of this.followed) this.follow(id);
+      this.emit("connected");
+    } catch (error) {
+      this.lastError = error.message;
+      socket.destroy();
+      throw error;
+    }
+  }
+  reconnect(reason) {
+    this.lastError = reason;
+    this.connected = false;
+    // A transport failure is recoverable. Only close() disables reconnection.
+    this.socket?.destroy();
   }
   read(b) {
     this.buffer = Buffer.concat([this.buffer, b]);
     while (this.buffer.length >= 4) {
       const size = this.buffer.readUInt32LE();
       if (size > 32 * 1024 * 1024) {
-        this.close();
+        this.reconnect("Codex 桌面同步数据超过 32 MB，正在重新连接");
         return;
       }
       if (this.buffer.length < size + 4) return;
@@ -62,7 +102,11 @@ export class DesktopIPC extends EventEmitter {
       try {
         m = JSON.parse(raw);
       } catch {
-        this.close();
+        this.reconnect("Codex 桌面同步数据格式无效，正在重新连接");
+        return;
+      }
+      if (!m || typeof m !== "object" || Array.isArray(m)) {
+        this.reconnect("Codex 桌面同步数据格式无效，正在重新连接");
         return;
       }
       if (m.type === "response") {
@@ -86,7 +130,7 @@ export class DesktopIPC extends EventEmitter {
   }
   write(m) {
     if (!this.socket || this.socket.destroyed)
-      throw new Error("Codex 桌面未连接");
+      throw new Error("手机已连接电脑，但连接程序与 Codex 桌面的通道已断开，正在自动重连");
     const b = Buffer.from(JSON.stringify(m));
     const h = Buffer.alloc(4);
     h.writeUInt32LE(b.length);
@@ -98,7 +142,9 @@ export class DesktopIPC extends EventEmitter {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
         reject(new Error("桌面未确认操作，发送结果待核实"));
-      }, 15000);
+        // Never replay an uncertain send. Reconnect and resubscribe only.
+        this.reconnect("Codex 桌面响应超时，正在重新连接；未确认的消息请勿重复发送");
+      }, this.timeoutMs);
       this.pending.set(requestId, { resolve, reject, timer });
       try {
         this.write({

@@ -1,6 +1,8 @@
 # AstroGate 管家
 
-当前版本：**iPhone 0.4.33、Android 0.2.3、Windows 连接程序 0.4.34**。Android 支持 Android 10 及以上，可直接安装 APK；复用现有电脑连接程序与加密中转。[Android 使用和构建说明](Android/README.md)。
+当前版本：**iPhone 0.4.33、Android 0.2.3、Windows 连接程序 0.4.35**。Android 支持 Android 10 及以上，可直接安装 APK；复用现有电脑连接程序与加密中转。[Android 使用和构建说明](Android/README.md)。
+
+Windows 0.4.35 修复桌面握手超时、异常同步数据导致通道无法自动恢复的问题。重连仅恢复订阅，不重复发送消息；桌面断线期间仍可读取历史，但不把旧轮次结果当作当前任务状态。手机 App 无需重装。
 
 底部入口依次为 **Codex、连接、服务、设置**。Codex 是聊天主页；连接页显示已绑定电脑并支持扫码新建连接，选中电脑后进入 Codex；服务页包含文件管理器和 SSH、SFTP、OpenClaw 服务。原有配对与文件继续保留。
 

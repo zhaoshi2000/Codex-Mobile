@@ -174,7 +174,8 @@ export class Gateway {
     const seen = new Set();
     result = result.slice().reverse().filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; }).reverse();
     while (result.length && Buffer.byteLength(JSON.stringify(result)) > 230000) result.shift();
-    return { messages: result, nextCursor: next, ...(outcome ? {outcome} : {}) };
+    // History remains readable during IPC loss, but is not proof of current runtime state.
+    return { messages: result, nextCursor: next, ...(outcome && this.ipc.connected !== false ? {outcome} : {}) };
   }
   async downloadPath(p, project) {
     const requested = p.absolutePath ? localLinkPath(p.absolutePath) : path.resolve(project.path, project.relativePath || "");

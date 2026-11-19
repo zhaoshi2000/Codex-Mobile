@@ -52,6 +52,14 @@ test('failed queued completions persist their outcome and history survives recon
  assert.equal((await g.handle('completions',{}, {publicKey:'other'})).items.length,0);
  const history=await g.history(threadId);assert.equal(history.outcome.kind,'quota');assert.match(history.messages.at(-1).text,/Nov 20th/);
 });
+test('persisted history cannot declare the current task stopped while desktop IPC is disconnected',async t=>{
+ const {g}=await fixture(t);
+ g.rpc.call=async m=>m==='thread/read'?{thread:{cwd:g.stateDir}}:m==='thread/turns/list'?{data:[{id:'old-turn',status:'interrupted'}]}:{data:[]};
+ g.ipc.connected=false;
+ assert.equal((await g.history('thread-test-123')).outcome,undefined);
+ g.ipc.connected=true;
+ assert.equal((await g.history('thread-test-123')).outcome.status,'interrupted');
+});
 test('instant quota failure ends monitored sending without falsely completing an older failed turn',async t=>{
  const {g}=await fixture(t);const threadId='thread-quota-123',events=[],peer={id:'phone',publicKey:'key',emit:e=>events.push(e)};
  g.subscribers.set(peer.id,{threadId,peer});g.ledger['send-message']={owner:'key',threadId,at:Date.now()};g.monitors.set(threadId,{messageId:'send-message',active:false});
