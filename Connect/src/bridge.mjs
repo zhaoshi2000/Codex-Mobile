@@ -179,6 +179,7 @@ export class Bridge {
       }
       const peer = {
         id,
+        reads: new Set(),
         publicKey: data.publicKey,
         secure,
         emit: (v) => this.raw(id, { type: "secure", box: secure.seal(v) }),
@@ -201,12 +202,26 @@ export class Bridge {
       typeof m.method !== "string"
     )
       throw new Error("请求格式错误");
-    try {
-      const result = await this.gateway.handle(m.method, m.params || {}, peer);
-      peer.emit({ id: m.id, result });
-    } catch (e) {
-      peer.emit({ id: m.id, error: String(e.message).slice(0, 500) });
+    const dispatch = async () => {
+      try {
+        const result = await this.gateway.handle(m.method, m.params || {}, peer);
+        if (this.peers.get(id) === peer) peer.emit({ id: m.id, result });
+      } catch (e) {
+        if (this.peers.get(id) === peer) peer.emit({ id: m.id, error: String(e.message).slice(0, 500) });
+      }
+    };
+    // Decode/authenticate frames in sequence, but don't let a read-only history
+    // scan block watch, model selection or the heartbeat. Mutations stay ordered.
+    if (m.method === "history") {
+      if (peer.reads.size >= 4) {
+        peer.emit({id: m.id, error: "历史记录正在加载，请稍后重试"});
+        return;
+      }
+      const work = dispatch().finally(() => peer.reads.delete(work));
+      peer.reads.add(work);
+      return;
     }
+    await dispatch();
   }
   async close() {
     this.stopping = true;

@@ -1,6 +1,8 @@
 # AstroGate 管家
 
-当前版本：**iPhone 0.4.34、Android 0.2.3、Windows 连接程序 0.4.35**。Android 支持 Android 10 及以上，可直接安装 APK；复用现有电脑连接程序与加密中转。[Android 使用和构建说明](Android/README.md)。
+当前版本：**iPhone 0.4.34、Android 0.2.3、Windows 连接程序 0.4.36**。Android 支持 Android 10 及以上，可直接安装 APK；复用现有电脑连接程序与加密中转。[Android 使用和构建说明](Android/README.md)。
+
+Windows 0.4.36 修复长对话读取过久使手机超时、模型和发送入口不可用的问题。历史按时间预算分批返回，可继续加载更早记录；历史读取不再阻塞订阅、模型、心跳和发送请求。现有手机 App 无需重装。
 
 iPhone 0.4.34 修复进入对话时页面任务取消导致 `Swift.CancellationError`、模型和发送长期不可用的问题。会话连接独立于页面任务，同一对话合并连接请求，切换后忽略旧响应；连接未就绪时自动恢复，并提供“重新连接对话”入口。
 

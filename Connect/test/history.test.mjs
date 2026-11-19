@@ -38,6 +38,40 @@ test('visible-message pagination crosses tools without skipping or duplicating c
   do {const page=await g.history('thread-history-123',cursor);counts.push(page.messages.filter(m=>m.role!=='tool').length);ids.push(...page.messages.filter(m=>m.role!=='tool').map(m=>m.id));cursor=page.nextCursor;}while(cursor);
   assert.deepEqual(counts,[50,50,27]);assert.equal(ids.length,new Set(ids).size);assert.equal(ids.length,127);
 });
+
+test('slow history returns a partial page and continues at the exact cursor without losing messages',async t=>{
+  const rows=Array.from({length:170},(_,i)=>({turnId:'t'+i,item:{type:i%2?'agentMessage':'commandExecution',id:'row'+i,text:'reply '+i}}));
+  const g=await fixture(t,rows),call=g.rpc.call;
+  g.historyBudgetMs=20;
+  g.rpc.call=async(m,p)=>{if(m==='thread/items/list')await new Promise(r=>setTimeout(r,15));return call(m,p);};
+  let cursor,ids=[];const counts=[];
+  do {
+    const page=await g.history('thread-slow-123',cursor);
+    const chats=page.messages.filter(m=>m.role==='assistant');counts.push(chats.length);ids.push(...chats.map(m=>m.id));cursor=page.nextCursor;
+  }while(cursor);
+  assert.ok(counts[0]<50);assert.equal(ids.length,85);assert.equal(new Set(ids).size,85);
+});
+
+test('concurrent retries share the same expensive history scan',async t=>{
+  const g=await fixture(t,[{turnId:'turn',item:{type:'agentMessage',id:'answer',text:'done'}}]);
+  const call=g.rpc.call;let scans=0;
+  g.rpc.call=async(m,p)=>{if(m==='thread/items/list'){scans++;await new Promise(r=>setTimeout(r,15));}return call(m,p);};
+  const [a,b]=await Promise.all([g.history('thread-cache-123'),g.history('thread-cache-123')]);
+  assert.deepEqual(a,b);assert.equal(scans,1);
+  assert.deepEqual(await g.history('thread-cache-123'),a);assert.equal(scans,1);
+});
+
+test('a timeout after filtered records preserves the continuation instead of failing chat connection',async t=>{
+  const g=await fixture(t,[]),call=g.rpc.call;let reads=0;
+  g.rpc.call=async(m,p)=>{
+    if(m!=='thread/items/list')return call(m,p);
+    if(++reads===1)return {data:[{turnId:'turn',item:{id:'reasoning',type:'reasoning'}}],nextCursor:'continue-here'};
+    throw Error('thread/items/list timeout');
+  };
+  const page=await g.history('thread-filtered-123');
+  assert.deepEqual(page.messages,[]);assert.equal(page.nextCursor,'continue-here');
+  await assert.rejects(g.history('thread-first-fails-123'),/timeout/);
+});
 test('late unwatch from previous chat does not detach the newly selected chat',async t=>{
   const g=await fixture(t,[]),peer={id:'phone',emit:()=>{}};
   await g.handle('watch',{threadId:'thread-current-123'},peer);

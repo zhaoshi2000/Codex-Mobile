@@ -40,6 +40,9 @@ export class Gateway {
     this.subscribers = new Map();
     this.states = new Map();
     this.timers = new Map();
+    this.historyReads = new Map();
+    this.historyCache = new Map();
+    this.historyBudgetMs = 7000;
     if (desktopCatalog) {
       this.catalog = new DesktopCatalog({ rpc, codexHome });
       this.activity = new DesktopActivity({ rpc, ipc, catalog: this.catalog, onCompleted: (id, at) => { this.completedThreads[id] = at; this.completedThreadProjects[id] = this.activity.rows.get(id)?.projectId || null; this.saveNavigation().catch(() => {}); }, isNeeded: id => this.pendingQueued.has(id) || this.monitors.has(id) || [...this.subscribers.values()].some(s => s.threadId === id) });
@@ -109,16 +112,36 @@ export class Gateway {
   }
   async history(threadId, cursor) {
     await this.authorizeThread(threadId);
-    let limit = 50, result = [], next = cursor || null;
+    const key = JSON.stringify([threadId, cursor || null]);
+    const cached = this.historyCache.get(key);
+    if (cached && cached.desktopConnected === this.ipc.connected && Date.now() - cached.at < 2000) return cached.page;
+    if (this.historyReads.has(key)) return this.historyReads.get(key);
+    const work = this.readHistory(threadId, cursor).then(page => {
+      this.historyCache.set(key, {at: Date.now(), desktopConnected: this.ipc.connected, page});
+      while (this.historyCache.size > 8) this.historyCache.delete(this.historyCache.keys().next().value);
+      return page;
+    }).finally(() => this.historyReads.delete(key));
+    this.historyReads.set(key, work);
+    return work;
+  }
+  async readHistory(threadId, cursor) {
+    const deadline = Date.now() + this.historyBudgetMs;
+    let limit = 50, result = [], next = cursor || null, pagesRead = 0;
     // Item pages include tools and reasoning. Fill a page with visible chat
     // messages, not the first 50 internal records. Never forward tool outputs.
     for (let scans = 0; scans < 100; scans++) {
-      const r = await this.rpc.call("thread/items/list", {
+      // Tool-heavy histories can require many expensive disk scans. Return a
+      // partial page before the phone times out, preserving the next cursor.
+      if (scans && Date.now() >= deadline) break;
+      let r;
+      try { r = await this.rpc.call("thread/items/list", {
         threadId,
         limit,
         sortDirection: "desc",
         ...(next ? { cursor: next } : {}),
-      });
+      }, Math.max(1000, deadline - Date.now())); }
+      catch (error) { if (!pagesRead) throw error; break; }
+      pagesRead++;
       const page = messages(
         r.data
           .slice()
@@ -147,8 +170,10 @@ export class Gateway {
     try {
       const metadata = [], oldest = result[0]?.turnId;
       let turnCursor;
+      const metadataDeadline = Date.now() + 3000;
       for (let page = 0; page < 3; page++) {
-        const r = await this.rpc.call("thread/turns/list", {threadId, limit: 100, sortDirection: "desc", ...(turnCursor ? {cursor: turnCursor} : {})});
+        if (Date.now() >= metadataDeadline) break;
+        const r = await this.rpc.call("thread/turns/list", {threadId, limit: 100, sortDirection: "desc", ...(turnCursor ? {cursor: turnCursor} : {})}, Math.max(1, metadataDeadline - Date.now()));
         metadata.push(...(r.data || []));
         if (!oldest || metadata.some(t => (t.id || t.turnId) === oldest) || !r.nextCursor || r.nextCursor === turnCursor) break;
         turnCursor = r.nextCursor;
@@ -841,6 +866,7 @@ export class Gateway {
       return;
     }
     this.states.set(id, state);
+    this.historyCache.delete(JSON.stringify([id, null]));
     if (this.timers.has(id)) return;
     this.timers.set(
       id,
