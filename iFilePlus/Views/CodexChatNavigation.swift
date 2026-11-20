@@ -179,7 +179,7 @@ struct CodexChatGroupView: View {
                     if message.role != "user" || !images.body.isEmpty {
                     HStack {
                         if group.isUser { Spacer(minLength: 24) }
-                        CodexMarkdownView(text: message.role == "user" ? images.body : message.text).textSelection(.enabled)
+                        CodexMarkdownView(text: message.role == "user" ? images.body : message.text, textColor: message.role == "error" ? .systemRed : .label)
                         .foregroundStyle(message.role == "error" ? Color.red : Color.primary)
                         .padding(group.isUser ? 12 : 0)
                         .background(group.isUser ? Color.blue.opacity(0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 12))

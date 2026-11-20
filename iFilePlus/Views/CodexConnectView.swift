@@ -389,6 +389,7 @@ private struct CodexChatContent: View {
     @State private var initialScroll = false
     @State private var scrollState = CodexChatScrollState()
     @State private var bottomScrollTask: Task<Void, Never>?
+    @State private var textSelections: Set<UUID> = []
     @State private var draft = ""
     @State private var sending = false
     @State private var pendingID: String?
@@ -523,6 +524,12 @@ private struct CodexChatContent: View {
                         }
                         Color.clear.frame(height: 1).id("bottom")
                     }.padding()
+                    .environment(\.codexTextSelectionChanged) { id, active in
+                        if active {
+                            textSelections.insert(id)
+                            scrollState.pause(); bottomScrollTask?.cancel()
+                        } else { textSelections.remove(id) }
+                    }
                     .onGeometryChange(for: CGFloat.self) { content in
                         content.frame(in: .named("codex-chat-scroll")).maxY
                     } action: { bottom in
@@ -655,13 +662,13 @@ private struct CodexChatContent: View {
         if distance > 18 { scrollToLatest(proxy) }
     }
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
-        guard !browsingOlder, !previewLoading, preview == nil, !service.messages.isEmpty,
+        guard textSelections.isEmpty, !browsingOlder, !previewLoading, preview == nil, !service.messages.isEmpty,
               !scrollState.interacting, scrollState.shouldFollow || !initialScroll else { return }
         initialScroll = true
         bottomScrollTask?.cancel()
         bottomScrollTask = Task { @MainActor in
             await Task.yield()
-            guard !Task.isCancelled, scrollState.shouldFollow, !browsingOlder, !previewLoading, preview == nil else { return }
+            guard !Task.isCancelled, textSelections.isEmpty, scrollState.shouldFollow, !browsingOlder, !previewLoading, preview == nil else { return }
             proxy.scrollTo("bottom", anchor: .bottom)
         }
     }

@@ -396,6 +396,15 @@ final class FileServicesTests: XCTestCase {
         XCTAssertEqual(ChatMarkdown.links("[网页](https://example.com)"), "[网页](https://example.com)")
         XCTAssertEqual(ChatMarkdown.blocks("|not a table|\n|normal text|"), [.text("|not a table|\n|normal text|")])
     }
+    func testMarkdownSelectionSpansParagraphsWithoutFlatteningCodeOrTables() {
+        let text = "第一段 **重点**\n\n第二段[文件](D:/report.pdf)\n\n```sh\nssh mac-dev\n```\n\n第三段\n\n第四段\n\n|名称|值|\n|---|---|\n|A|1|\n\n结束"
+        XCTAssertEqual(ChatMarkdown.selectionBlocks(text), [
+            .text("第一段 **重点**\n\n第二段[文件](D:/report.pdf)"),
+            .code("ssh mac-dev"), .text("第三段\n\n第四段"),
+            .table([["名称", "值"], ["A", "1"]]), .text("结束")
+        ])
+        XCTAssertEqual(ChatMarkdown.selectionBlocks(""), [])
+    }
     func temp() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)

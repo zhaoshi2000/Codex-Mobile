@@ -5,6 +5,17 @@ enum ChatBlock: Equatable {
 }
 
 enum ChatMarkdown {
+    // Keep adjacent paragraphs in one selectable surface. Code and tables retain
+    // their own scrolling/copy controls and must not turn into prose.
+    static func selectionBlocks(_ text: String) -> [ChatBlock] {
+        var result: [ChatBlock] = []
+        for block in blocks(text) {
+            if case .text(let value) = block, case .text(let previous) = result.last {
+                result[result.count - 1] = .text(previous + "\n\n" + value)
+            } else { result.append(block) }
+        }
+        return result
+    }
     static func cells(_ line: String) -> [String] {
         var parts: [String] = [], cell = "", escaped = false, code = false
         for c in line.trimmingCharacters(in: .whitespaces) {
