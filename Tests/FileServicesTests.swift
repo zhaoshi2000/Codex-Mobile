@@ -2,6 +2,21 @@ import XCTest
 @testable import FileServices
 
 final class FileServicesTests: XCTestCase {
+    func testRecentChatsRestoreConfirmedMessagesWithBoundedPerDeviceMemory() {
+        var cache = CodexRecentChatCache(), otherDevice = CodexRecentChatCache()
+        let confirmed = CodexChatMessage(["id": "reply", "role": "assistant", "text": "hello"])!
+        let pending = CodexChatMessage(id: "pending", text: "unconfirmed", delivery: "正在发送")
+        cache.put("chat", messages: [confirmed, pending], cursor: "older")
+        XCTAssertEqual(cache.get("chat")?.messages.map(\.id), ["reply"])
+        XCTAssertEqual(cache.get("chat")?.cursor, "older")
+        XCTAssertNil(otherDevice.get("chat"))
+        for i in 1...4 { cache.put("chat\(i)", messages: [confirmed], cursor: nil) }
+        XCTAssertNil(cache.get("chat")); XCTAssertNotNil(cache.get("chat4"))
+        let many = (0..<300).map { CodexChatMessage(["id": "\($0)", "text": String(repeating: "中", count: 1000)])! }
+        cache.put("large", messages: many, cursor: nil)
+        let rows = cache.get("large")!.messages
+        XCTAssertLessThanOrEqual(rows.count, 200); XCTAssertLessThanOrEqual(rows.reduce(0) { $0 + $1.text.utf8.count }, 512000)
+    }
     @MainActor
     func testChatSelectionSurvivesCancelledViewWaiterAndCoalescesReentry() async throws {
         let selection = CodexChatSelection()

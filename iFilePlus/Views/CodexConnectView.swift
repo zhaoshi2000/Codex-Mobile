@@ -504,6 +504,8 @@ private struct CodexChatContent: View {
                     VStack(alignment: .leading, spacing: 16) {
                         HStack {
                             if service.olderCursor != nil { Button("上一页记录") { Task { browsingOlder = true; await service.older(thread.id) } } }
+                            if service.loadingHistory { ProgressView().controlSize(.mini); Text("正在补充记录…").foregroundStyle(.secondary) }
+                            else if let error = service.historyError { Text(error).foregroundStyle(.secondary); Button("重试") { service.reloadHistory(thread.id) } }
                             Spacer()
                             if browsingOlder { Text("正在查看较早记录").foregroundStyle(.secondary) }
                         }.font(.caption)

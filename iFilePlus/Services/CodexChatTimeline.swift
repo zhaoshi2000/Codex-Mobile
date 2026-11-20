@@ -1,5 +1,25 @@
 import Foundation
 
+// Per-device, memory-only cache; runtime/permission state always comes from a
+// fresh watch. Never restore an unconfirmed outgoing bubble as delivered.
+struct CodexRecentChatCache {
+    struct Page { var messages: [CodexChatMessage]; var cursor: String? }
+    private var pages: [String: Page] = [:]
+    private var order: [String] = []
+    mutating func put(_ id: String, messages: [CodexChatMessage], cursor: String?) {
+        var rows = messages.filter { !$0.provisional && $0.delivery == nil }
+        while rows.count > 200 || rows.reduce(0, { $0 + $1.text.utf8.count }) > 512000 { rows.removeFirst() }
+        guard !rows.isEmpty else { return }
+        pages[id] = Page(messages: rows, cursor: cursor)
+        order.removeAll { $0 == id }; order.append(id)
+        while order.count > 4 { pages.removeValue(forKey: order.removeFirst()) }
+    }
+    mutating func get(_ id: String) -> Page? {
+        guard let page = pages[id] else { return nil }
+        order.removeAll { $0 == id }; order.append(id); return page
+    }
+}
+
 /// Only a user's scroll changes follow intent. Layout, keyboard and history
 /// updates can move the measured bottom without the user leaving the latest reply.
 struct CodexChatScrollState {

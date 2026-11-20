@@ -61,6 +61,12 @@ test('concurrent retries share the same expensive history scan',async t=>{
   assert.deepEqual(await g.history('thread-cache-123'),a);assert.equal(scans,1);
 });
 
+test('initial history page has its own timeout and is not cut off by the multi-page scan budget',async t=>{
+  const g=await fixture(t,[]),call=g.rpc.call;g.historyBudgetMs=1;let timeLimit;
+  g.rpc.call=async(m,p,timeout)=>{if(m==='thread/items/list'){timeLimit=timeout;await new Promise(r=>setTimeout(r,5));return {data:[{turnId:'t',item:{id:'reply',type:'agentMessage',text:'ok'}}],nextCursor:'next'};}return call(m,p);};
+  const page=await g.history('thread-slow-first-123');assert.equal(timeLimit,20000);assert.equal(page.nextCursor,'next');assert.equal(page.messages[0].text,'ok');
+});
+
 test('a timeout after filtered records preserves the continuation instead of failing chat connection',async t=>{
   const g=await fixture(t,[]),call=g.rpc.call;let reads=0;
   g.rpc.call=async(m,p)=>{

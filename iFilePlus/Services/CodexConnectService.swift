@@ -115,6 +115,12 @@ extension Data {
         threadTitles[id] = result["title"] as? String ?? title
     }
     @Published var olderCursor: String?
+    @Published private(set) var loadingHistory = false
+    @Published private(set) var historyError: String?
+    private var historyTask: Task<Void, Never>?
+    private var historyLoadID = UUID()
+    private var timelineRevision = 0
+    private var chatCache = CodexRecentChatCache()
     @Published var running = false
     @Published var questions: [CodexQuestionGroup] = []
     @Published var progressLabel = ""
@@ -170,7 +176,7 @@ extension Data {
     private var wantsConnection = false
 
     init(device: CodexDevice) { self.device = device }
-    deinit { reconnectTask?.cancel(); heartbeatTask?.cancel(); receiveTask?.cancel(); sendTask?.cancel(); readyTimeout?.cancel(); socket?.cancel(with: .goingAway, reason: nil) }
+    deinit { historyTask?.cancel(); reconnectTask?.cancel(); heartbeatTask?.cancel(); receiveTask?.cancel(); sendTask?.cancel(); readyTimeout?.cancel(); socket?.cancel(with: .goingAway, reason: nil) }
     func connect() async {
         guard !connecting else { return }
         wantsConnection = true; connecting = true
@@ -315,6 +321,7 @@ extension Data {
             KeychainStore.delete(account: "codex.pair." + device.id); readyTimeout?.cancel(); ready?.resume(); ready = nil
         case "timeline":
             guard value["threadId"] as? String == selectedThread else { return }
+            timelineRevision += 1
             if !showingOlder { merge(value["messages"] as? [[String: Any]] ?? []) }
             running = value["status"] as? String == "active"; turnID = value["turnId"] as? String
             if running { notice = nil; taskFailure = nil }
@@ -355,7 +362,8 @@ extension Data {
                 try? await Task.sleep(for: .seconds(method == "transcribe" ? 20 : 45))
                 guard !Task.isCancelled, let self, let c = self.pending.removeValue(forKey: id) else { return }
                 self.deadlines.removeValue(forKey: id)
-                c.resume(throwing: CodexConnectError(message: method == "transcribe" ? "语音识别连接超时，请检查网络与识别电脑。" : "请求超时。发送可能已到达电脑，请先刷新原对话确认。"))
+                let mutation = ["send", "answer", "steerQueued", "removeQueued", "stop", "setModel", "createThread", "forkThread", "deleteThread", "renameThread"].contains(method)
+                c.resume(throwing: CodexConnectError(message: method == "transcribe" ? "语音识别连接超时，请检查网络与识别电脑。" : mutation ? "操作确认超时，请先刷新原对话确认结果，避免重复提交。" : "读取超时，请稍后重试。"))
             }
             enqueue(["id": id, "method": method, "params": params], encrypted: true)
         }
@@ -402,18 +410,19 @@ extension Data {
         selecting = true
         defer { if chatSelection.isCurrent(token, threadID: threadID) { selecting = false } }
         let retainVisibleMessages = selectedThread == threadID && !showingOlder
+        cacheCurrentChat()
+        historyTask?.cancel(); historyLoadID = UUID(); loadingHistory = false; historyError = nil
         taskFailure = nil; modelEfforts = [:]; modelDefaultEfforts = [:]
         writable = false
         running = false; notice = nil; questions = []; queuedMessages = []; progressLabel = ""; progressSteps = []; currentModel = ""; currentEffort = ""; models = []; selectedThread = threadID; showingOlder = false; olderCursor = nil; turnID = nil; approvalNeeded = false; error = nil
-        if !retainVisibleMessages { messages = [] }
+        if !retainVisibleMessages {
+            let cached = chatCache.get(threadID)
+            messages = cached?.messages ?? []; olderCursor = cached?.cursor
+        }
         if !connected { await connect() }
         guard current(), connected else { return }
         let transport = generation
         do {
-            let page = try await request("history", ["threadId": threadID])
-            guard current(), generation == transport else { return }
-            merge(page["messages"] as? [[String: Any]] ?? [], history: true); olderCursor = page["nextCursor"] as? String
-            if !running { applyOutcome(page["outcome"] as? [String: Any]) }
             var result = try await request("watch", ["threadId": threadID])
             guard current(), generation == transport else { return }
             if activate && result["writable"] as? Bool != true {
@@ -429,6 +438,8 @@ extension Data {
             }
             guard current(), generation == transport else { return }
             writable = result["writable"] as? Bool ?? false; status = result["message"] as? String ?? "已连接"
+            selecting = false
+            reloadHistory(threadID)
             if writable { error = nil; await refreshModels(threadID) }
             guard current(), generation == transport else { return }
             await refreshQueue(threadID)
@@ -439,7 +450,31 @@ extension Data {
             self.error = "对话连接暂未就绪：" + error.localizedDescription + "。可点“重新连接对话”重试。"
         }
     }
-    func leaveChat(_ expectedID: String? = nil) { if let expectedID, selectedThread != expectedID { return }; let leaving = selectedThread; chatSelection.cancel(); selecting = false; selectedThread = nil; messages = []; queuedMessages = []; olderCursor = nil; writable = false; running = false; Task { if let leaving, selectedThread != leaving { _ = try? await request("unwatch", ["threadId": leaving]) } } }
+    private func cacheCurrentChat() {
+        if let id = selectedThread, !showingOlder { chatCache.put(id, messages: messages, cursor: olderCursor) }
+    }
+    func reloadHistory(_ threadID: String) {
+        guard selectedThread == threadID, connected, !loadingHistory else { return }
+        historyTask?.cancel(); historyLoadID = UUID()
+        let loadID = historyLoadID, transport = generation, revision = timelineRevision
+        loadingHistory = true; historyError = nil
+        historyTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            @MainActor func current() -> Bool { self.historyLoadID == loadID && self.selectedThread == threadID && self.generation == transport && !Task.isCancelled }
+            defer { if current() { self.loadingHistory = false } }
+            do {
+                let page = try await self.request("history", ["threadId": threadID])
+                guard current(), !self.showingOlder else { return }
+                self.merge(page["messages"] as? [[String: Any]] ?? [], history: true)
+                self.olderCursor = page["nextCursor"] as? String
+                if !self.running, self.timelineRevision == revision { self.applyOutcome(page["outcome"] as? [String: Any]) }
+                self.cacheCurrentChat()
+            } catch {
+                if current() { self.historyError = "较早记录暂未加载，可重试。" }
+            }
+        }
+    }
+    func leaveChat(_ expectedID: String? = nil) { if let expectedID, selectedThread != expectedID { return }; cacheCurrentChat(); historyTask?.cancel(); historyLoadID = UUID(); loadingHistory = false; historyError = nil; let leaving = selectedThread; chatSelection.cancel(); selecting = false; selectedThread = nil; messages = []; queuedMessages = []; olderCursor = nil; writable = false; running = false; Task { if let leaving, selectedThread != leaving { _ = try? await request("unwatch", ["threadId": leaving]) } } }
     func older(_ threadID: String) async {
         guard let cursor = olderCursor else { return }
         showingOlder = true

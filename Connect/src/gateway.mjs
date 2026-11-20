@@ -140,7 +140,7 @@ export class Gateway {
         limit,
         sortDirection: "desc",
         ...(next ? { cursor: next } : {}),
-      }, Math.max(1000, deadline - Date.now())); }
+      }, pagesRead ? Math.max(1000, deadline - Date.now()) : 20000); }
       catch (error) { if (!pagesRead) throw error; break; }
       pagesRead++;
       const page = messages(

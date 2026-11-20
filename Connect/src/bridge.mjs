@@ -210,11 +210,11 @@ export class Bridge {
         if (this.peers.get(id) === peer) peer.emit({ id: m.id, error: String(e.message).slice(0, 500) });
       }
     };
-    // Decode/authenticate frames in sequence, but don't let a read-only history
-    // scan block watch, model selection or the heartbeat. Mutations stay ordered.
-    if (m.method === "history") {
-      if (peer.reads.size >= 4) {
-        peer.emit({id: m.id, error: "历史记录正在加载，请稍后重试"});
+    // Authenticate frames in order; background reads must not queue in front of
+    // chat actions. Keep all state-changing methods on the ordered lane.
+    if (["history", "activity", "navigation", "projects", "threads", "quota", "imageThumbnail", "commandDetails", "fileChunk"].includes(m.method)) {
+      if (peer.reads.size >= 12) {
+        peer.emit({id: m.id, error: "后台读取较多，请稍后重试"});
         return;
       }
       const work = dispatch().finally(() => peer.reads.delete(work));
