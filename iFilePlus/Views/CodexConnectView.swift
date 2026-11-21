@@ -390,6 +390,7 @@ private struct CodexChatContent: View {
     @State private var scrollState = CodexChatScrollState()
     @State private var bottomScrollTask: Task<Void, Never>?
     @State private var textSelections: Set<UUID> = []
+    @State private var visibleGroupCount = 40
     @State private var draft = ""
     @State private var sending = false
     @State private var pendingID: String?
@@ -510,7 +511,19 @@ private struct CodexChatContent: View {
                             Spacer()
                             if browsingOlder { Text("正在查看较早记录").foregroundStyle(.secondary) }
                         }.font(.caption)
-                        ForEach(CodexChatTimeline.groups(service.messages)) { group in
+                        let groups = CodexChatTimeline.visibleGroups(service.messages, count: visibleGroupCount)
+                        if groups.all.count > groups.visible.count {
+                            Button("显示更早对话（还有 \(groups.all.count - groups.visible.count) 组）") {
+                                scrollState.pause(); bottomScrollTask?.cancel()
+                                let anchor = groups.visible.first?.id
+                                visibleGroupCount += 40
+                                Task { @MainActor in
+                                    await Task.yield()
+                                    if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+                                }
+                            }.font(.footnote).frame(maxWidth: .infinity).padding(.vertical, 10)
+                        }
+                        ForEach(groups.visible) { group in
                             CodexChatGroupView(service: service, threadID: thread.id, group: group, forking: forking, openFile: openPCFile, openImages: openImages, fork: { forkMessage = $0 })
                         }
                         if !browsingOlder {
@@ -620,6 +633,7 @@ private struct CodexChatContent: View {
             Button("创建分支") { if let message = forkMessage { Task { await fork(message) } }; forkMessage = nil }
         } message: { Text("复制到所选回复所在轮次结束的记录，进入新对话继续。原对话保持不变；正在输出的轮次需先完成。") }
         .task {
+            visibleGroupCount = 40
             if let saved = KeychainStore.get(account: pendingAccount), let data = saved.data(using: .utf8),
                let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let id = value["id"] as? String, let text = value["text"] as? String {
                 pendingID = id; pendingText = text; draft = text; uncertain = true; uploadedIDs = value["attachments"] as? [String] ?? []

@@ -12,7 +12,7 @@ struct CodexRecentChatCache {
         guard !rows.isEmpty else { return }
         pages[id] = Page(messages: rows, cursor: cursor)
         order.removeAll { $0 == id }; order.append(id)
-        while order.count > 4 { pages.removeValue(forKey: order.removeFirst()) }
+        while order.count > 8 { pages.removeValue(forKey: order.removeFirst()) }
     }
     mutating func get(_ id: String) -> Page? {
         guard let page = pages[id] else { return nil }
@@ -91,6 +91,10 @@ struct CodexChatBlock: Identifiable {
 }
 
 enum CodexChatTimeline {
+    static func visibleGroups(_ messages: [CodexChatMessage], count: Int) -> (all: [CodexChatGroup], visible: [CodexChatGroup]) {
+        let all = groups(messages)
+        return (all, Array(all.suffix(max(1, count))))
+    }
     static func groups(_ messages: [CodexChatMessage]) -> [CodexChatGroup] {
         var result: [CodexChatGroup] = []
         for row in messages {

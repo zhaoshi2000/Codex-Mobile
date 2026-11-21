@@ -121,6 +121,7 @@ extension Data {
     private var historyLoadID = UUID()
     private var timelineRevision = 0
     private var chatCache = CodexRecentChatCache()
+    private var nextWritableCheck = Date.distantPast
     @Published var running = false
     @Published var questions: [CodexQuestionGroup] = []
     @Published var progressLabel = ""
@@ -401,7 +402,19 @@ extension Data {
     func ensureSelected(_ threadID: String) async {
         guard !Task.isCancelled else { return }
         if selectedThread != threadID { await select(threadID); return }
-        if !writable { await select(threadID, activate: false) }
+        if !writable {
+            if !connected { await connect(); return }
+            guard !chatSelection.isRunning, Date() >= nextWritableCheck else { return }
+            nextWritableCheck = Date().addingTimeInterval(15)
+            let transport = generation
+            do {
+                let result = try await request("watch", ["threadId": threadID])
+                guard selectedThread == threadID, generation == transport else { return }
+                writable = result["writable"] as? Bool ?? false
+                status = result["message"] as? String ?? status
+                if writable { error = nil; await refreshModels(threadID) }
+            } catch { /* The manual reconnect button remains available. */ }
+        }
         else if models.isEmpty { await refreshModels(threadID) }
     }
     private func loadSelection(_ threadID: String, activate: Bool, token: UUID) async {
@@ -425,7 +438,12 @@ extension Data {
         do {
             var result = try await request("watch", ["threadId": threadID])
             guard current(), generation == transport else { return }
-            if activate && result["writable"] as? Bool != true {
+            writable = result["writable"] as? Bool ?? false; status = result["message"] as? String ?? "已连接"
+            selecting = false
+            reloadHistory(threadID)
+            if activate && !writable {
+                // Opening Desktop can take seconds. Keep history and the live
+                // timeline visible while waiting for the owner to become ready.
                 status = "正在打开电脑原对话…"
                 _ = try await request("activate", ["threadId": threadID])
                 for _ in 0..<8 {
@@ -435,11 +453,10 @@ extension Data {
                     guard current(), generation == transport else { return }
                     if result["writable"] as? Bool == true { break }
                 }
+                guard current(), generation == transport else { return }
+                writable = result["writable"] as? Bool ?? false
+                status = result["message"] as? String ?? "已连接"
             }
-            guard current(), generation == transport else { return }
-            writable = result["writable"] as? Bool ?? false; status = result["message"] as? String ?? "已连接"
-            selecting = false
-            reloadHistory(threadID)
             if writable { error = nil; await refreshModels(threadID) }
             guard current(), generation == transport else { return }
             await refreshQueue(threadID)

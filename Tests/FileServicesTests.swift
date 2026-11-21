@@ -10,8 +10,8 @@ final class FileServicesTests: XCTestCase {
         XCTAssertEqual(cache.get("chat")?.messages.map(\.id), ["reply"])
         XCTAssertEqual(cache.get("chat")?.cursor, "older")
         XCTAssertNil(otherDevice.get("chat"))
-        for i in 1...4 { cache.put("chat\(i)", messages: [confirmed], cursor: nil) }
-        XCTAssertNil(cache.get("chat")); XCTAssertNotNil(cache.get("chat4"))
+        for i in 1...8 { cache.put("chat\(i)", messages: [confirmed], cursor: nil) }
+        XCTAssertNil(cache.get("chat")); XCTAssertNotNil(cache.get("chat8"))
         let many = (0..<300).map { CodexChatMessage(["id": "\($0)", "text": String(repeating: "中", count: 1000)])! }
         cache.put("large", messages: many, cursor: nil)
         let rows = cache.get("large")!.messages
@@ -404,6 +404,17 @@ final class FileServicesTests: XCTestCase {
             .table([["名称", "值"], ["A", "1"]]), .text("结束")
         ])
         XCTAssertEqual(ChatMarkdown.selectionBlocks(""), [])
+    }
+    func testChatInitialRenderIsBoundedWhileEarlierGroupsRemainReachable() {
+        let rows = (0..<90).map { chat("render-\($0)", String(repeating: "长消息", count: 100), turn: "t\($0)") }
+        let first = CodexChatTimeline.visibleGroups(rows, count: 40)
+        XCTAssertEqual(first.all.count, 90)
+        XCTAssertEqual(first.visible.count, 40)
+        XCTAssertEqual(first.visible.first?.id, "render-50")
+        XCTAssertEqual(first.visible.last?.id, "render-89")
+        let expanded = CodexChatTimeline.visibleGroups(rows, count: 80)
+        XCTAssertEqual(expanded.visible.first?.id, "render-10")
+        XCTAssertEqual(CodexChatTimeline.visibleGroups(rows, count: 120).visible.count, 90)
     }
     func temp() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
