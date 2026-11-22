@@ -117,9 +117,11 @@ extension Data {
     @Published var olderCursor: String?
     @Published private(set) var loadingHistory = false
     @Published private(set) var historyError: String?
+    @Published private(set) var historyDeferred = false
     private var historyTask: Task<Void, Never>?
     private var historyLoadID = UUID()
     private var timelineRevision = 0
+    private var selectionStartRevision = 0
     private var chatCache = CodexRecentChatCache()
     private var nextWritableCheck = Date.distantPast
     @Published var running = false
@@ -424,7 +426,7 @@ extension Data {
         defer { if chatSelection.isCurrent(token, threadID: threadID) { selecting = false } }
         let retainVisibleMessages = selectedThread == threadID && !showingOlder
         cacheCurrentChat()
-        historyTask?.cancel(); historyLoadID = UUID(); loadingHistory = false; historyError = nil
+        historyTask?.cancel(); historyLoadID = UUID(); loadingHistory = false; historyError = nil; historyDeferred = false
         taskFailure = nil; modelEfforts = [:]; modelDefaultEfforts = [:]
         writable = false
         running = false; notice = nil; questions = []; queuedMessages = []; progressLabel = ""; progressSteps = []; currentModel = ""; currentEffort = ""; models = []; selectedThread = threadID; showingOlder = false; olderCursor = nil; turnID = nil; approvalNeeded = false; error = nil
@@ -432,6 +434,7 @@ extension Data {
             let cached = chatCache.get(threadID)
             messages = cached?.messages ?? []; olderCursor = cached?.cursor
         }
+        selectionStartRevision = timelineRevision
         if !connected { await connect() }
         guard current(), connected else { return }
         let transport = generation
@@ -470,28 +473,40 @@ extension Data {
     private func cacheCurrentChat() {
         if let id = selectedThread, !showingOlder { chatCache.put(id, messages: messages, cursor: olderCursor) }
     }
-    func reloadHistory(_ threadID: String) {
+    func reloadHistory(_ threadID: String, force: Bool = false) {
         guard selectedThread == threadID, connected, !loadingHistory else { return }
         historyTask?.cancel(); historyLoadID = UUID()
         let loadID = historyLoadID, transport = generation, revision = timelineRevision
-        loadingHistory = true; historyError = nil
+        loadingHistory = true; historyError = nil; historyDeferred = false
         historyTask = Task { @MainActor [weak self] in
             guard let self else { return }
             @MainActor func current() -> Bool { self.historyLoadID == loadID && self.selectedThread == threadID && self.generation == transport && !Task.isCancelled }
             defer { if current() { self.loadingHistory = false } }
             do {
+                // The desktop stream supplies the newest messages quickly.
+                // Avoid scanning a long disk history unless that stream is empty.
+                if !force {
+                    try await Task.sleep(for: .milliseconds(850))
+                    guard current() else { return }
+                    if self.timelineRevision > self.selectionStartRevision && !self.messages.isEmpty {
+                        self.historyDeferred = true
+                        self.cacheCurrentChat()
+                        return
+                    }
+                }
                 let page = try await self.request("history", ["threadId": threadID])
                 guard current(), !self.showingOlder else { return }
                 self.merge(page["messages"] as? [[String: Any]] ?? [], history: true)
                 self.olderCursor = page["nextCursor"] as? String
+                self.historyDeferred = false
                 if !self.running, self.timelineRevision == revision { self.applyOutcome(page["outcome"] as? [String: Any]) }
                 self.cacheCurrentChat()
             } catch {
-                if current() { self.historyError = "较早记录暂未加载，可重试。" }
+                if current() { self.historyError = "较早记录暂未加载，可重试。"; self.historyDeferred = true }
             }
         }
     }
-    func leaveChat(_ expectedID: String? = nil) { if let expectedID, selectedThread != expectedID { return }; cacheCurrentChat(); historyTask?.cancel(); historyLoadID = UUID(); loadingHistory = false; historyError = nil; let leaving = selectedThread; chatSelection.cancel(); selecting = false; selectedThread = nil; messages = []; queuedMessages = []; olderCursor = nil; writable = false; running = false; Task { if let leaving, selectedThread != leaving { _ = try? await request("unwatch", ["threadId": leaving]) } } }
+    func leaveChat(_ expectedID: String? = nil) { if let expectedID, selectedThread != expectedID { return }; cacheCurrentChat(); historyTask?.cancel(); historyLoadID = UUID(); loadingHistory = false; historyError = nil; historyDeferred = false; let leaving = selectedThread; chatSelection.cancel(); selecting = false; selectedThread = nil; messages = []; queuedMessages = []; olderCursor = nil; writable = false; running = false; Task { if let leaving, selectedThread != leaving { _ = try? await request("unwatch", ["threadId": leaving]) } } }
     func older(_ threadID: String) async {
         guard let cursor = olderCursor else { return }
         showingOlder = true

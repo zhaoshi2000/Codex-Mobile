@@ -61,10 +61,18 @@ test('concurrent retries share the same expensive history scan',async t=>{
   assert.deepEqual(await g.history('thread-cache-123'),a);assert.equal(scans,1);
 });
 
-test('initial history page has its own timeout and is not cut off by the multi-page scan budget',async t=>{
-  const g=await fixture(t,[]),call=g.rpc.call;g.historyBudgetMs=1;let timeLimit;
-  g.rpc.call=async(m,p,timeout)=>{if(m==='thread/items/list'){timeLimit=timeout;await new Promise(r=>setTimeout(r,5));return {data:[{turnId:'t',item:{id:'reply',type:'agentMessage',text:'ok'}}],nextCursor:'next'};}return call(m,p);};
-  const page=await g.history('thread-slow-first-123');assert.equal(timeLimit,20000);assert.equal(page.nextCursor,'next');assert.equal(page.messages[0].text,'ok');
+test('initial history page is bounded while retaining its continuation cursor',async t=>{
+  const g=await fixture(t,[]),call=g.rpc.call;g.historyBudgetMs=1;let timeLimit,firstLimit;
+  g.rpc.call=async(m,p,timeout)=>{if(m==='thread/items/list'){timeLimit=timeout;firstLimit=p.limit;await new Promise(r=>setTimeout(r,5));return {data:[{turnId:'t',item:{id:'reply',type:'agentMessage',text:'ok'}}],nextCursor:'next'};}return call(m,p);};
+  const page=await g.history('thread-slow-first-123');assert.equal(timeLimit,8000);assert.equal(firstLimit,15);assert.equal(page.nextCursor,'next');assert.equal(page.messages[0].text,'ok');
+});
+
+test('live payload limits old commands and replies while keeping the newest reply',()=>{
+  const turns=Array.from({length:100},(_,i)=>({id:'turn'+i,items:[{id:'cmd'+i,type:'commandExecution',command:'echo '+i},{id:'reply'+i,type:'agentMessage',text:'reply '+i}]}));
+  const latest=messages(turns,80000,true,24,32);
+  assert.equal(latest.at(-1).id,'reply99');
+  assert.equal(latest.filter(m=>m.role==='assistant').length,24);
+  assert.equal(latest.filter(m=>m.role==='tool').length,32);
 });
 
 test('a timeout after filtered records preserves the continuation instead of failing chat connection',async t=>{

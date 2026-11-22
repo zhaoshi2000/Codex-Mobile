@@ -81,7 +81,7 @@ export function turnOutcome(turn) {
   if (turn.status === "completed") return { status: "completed" };
   return null;
 }
-export function messages(turns, budget = 230000, includeCommands = false) {
+export function messages(turns, budget = 230000, includeCommands = false, maxChats = 50, maxTools = 100) {
   const out = [];
   let bytes = 0;
   for (const turn of turns || []) {
@@ -140,7 +140,7 @@ export function messages(turns, budget = 230000, includeCommands = false) {
   return out
     .reverse()
     .filter((m) => {
-      if (m.role === "tool" ? ++tools > 100 : ++chats > 50) return false;
+      if (m.role === "tool" ? ++tools > maxTools : ++chats > maxChats) return false;
       total += Buffer.byteLength(JSON.stringify(m));
       return total < budget;
     })

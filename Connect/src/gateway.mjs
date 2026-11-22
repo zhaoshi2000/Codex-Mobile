@@ -127,7 +127,7 @@ export class Gateway {
   }
   async readHistory(threadId, cursor) {
     const deadline = Date.now() + this.historyBudgetMs;
-    let limit = 50, result = [], next = cursor || null, pagesRead = 0;
+    let limit = cursor ? 50 : 15, result = [], next = cursor || null, pagesRead = 0;
     // Item pages include tools and reasoning. Fill a page with visible chat
     // messages, not the first 50 internal records. Never forward tool outputs.
     for (let scans = 0; scans < 100; scans++) {
@@ -140,7 +140,7 @@ export class Gateway {
         limit,
         sortDirection: "desc",
         ...(next ? { cursor: next } : {}),
-      }, pagesRead ? Math.max(1000, deadline - Date.now()) : 20000); }
+      }, pagesRead ? Math.max(1000, deadline - Date.now()) : 8000); }
       catch (error) { if (!pagesRead) throw error; break; }
       pagesRead++;
       const page = messages(
@@ -888,7 +888,7 @@ export class Gateway {
         const event = {
           event: "timeline",
           threadId: id,
-          messages: subscribers.length ? messages(turns, 230000, true) : [],
+          messages: subscribers.length ? messages(turns, 80000, true, 24, 32) : [],
           questions: groups.map(({ requestId, ...g }) => g),
           progress: progress(s),
           model: s.latestCollaborationMode?.settings?.model || s.latestModel || null,

@@ -8,7 +8,7 @@ import zipfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--runtime', required=True, type=Path, help='Directory containing node.exe and LICENSE')
-parser.add_argument('--version', default='0.4.38')
+parser.add_argument('--version', default='0.4.39')
 parser.add_argument('--setup-token-file', type=Path,
                     help='Private 32+ character relay connection token. Never commit this file.')
 args = parser.parse_args()
