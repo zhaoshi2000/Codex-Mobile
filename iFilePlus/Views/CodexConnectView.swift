@@ -184,14 +184,21 @@ private struct CodexHostView: View {
                 }
             }
             Group {
-                Section("最近对话") {
+                Section {
                     ForEach(threads) { thread in
                         NavigationLink { CodexChatView(service: service, thread: thread) } label: { VStack(alignment: .leading, spacing: 4) { Text(service.title(for: thread)).lineLimit(2); Text(thread.path).font(.caption).foregroundStyle(.secondary) } }
                             .disabled(!service.connected)
                             .modifier(CodexDeleteChat(service: service, thread: thread, onDeleted: { await load() }))
+                            .onAppear { if thread.id == threads.last?.id, cursor != nil { Task { await load(more: true) } } }
                     }
                     if cursor != nil { Button("查看更多（20 条）") { Task { await load(more: true) } }.disabled(loading) }
                     if threads.isEmpty && service.connected && !loading { Text("本机暂无对话").foregroundStyle(.secondary) }
+                } header: {
+                    HStack {
+                        Text("最近对话 · 已加载 \(threads.count) 条")
+                        Spacer()
+                        if cursor != nil { Button("加载更多") { Task { await load(more: true) } }.disabled(loading) }
+                    }
                 }
             }
             if loading { ProgressView() }
@@ -243,6 +250,7 @@ private struct CodexThreadsView: View {
                 ForEach(threads) { thread in
                     NavigationLink { CodexChatView(service: service, thread: thread) } label: { Text(service.title(for: thread)).lineLimit(2) }
                         .modifier(CodexDeleteChat(service: service, thread: thread, onDeleted: { await load() }))
+                        .onAppear { if thread.id == threads.last?.id, cursor != nil { Task { await load(more: true) } } }
                 }
                 if let _ = cursor { Button("查看更多（20 条）") { Task { await load(more: true) } }.disabled(loading) }
                 if loading { ProgressView() }
@@ -483,6 +491,17 @@ private struct CodexChatContent: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
+                    let groups = CodexChatTimeline.visibleGroups(service.messages, count: visibleGroupCount)
+                    if groups.all.count > groups.visible.count {
+                        Button("展开更早消息（\(groups.all.count - groups.visible.count) 组）") {
+                            scrollState.pause(); bottomScrollTask?.cancel()
+                            visibleGroupCount += 24
+                        }.font(.caption)
+                    } else if service.historyDeferred && service.olderCursor == nil {
+                        Button("读取更早记录") { service.reloadHistory(thread.id, force: true) }.font(.caption)
+                    } else if service.olderCursor != nil {
+                        Button("上一页记录") { Task { browsingOlder = true; await service.older(thread.id) } }.font(.caption)
+                    }
                     Spacer()
                     Button { modelsOpen = true } label: {
                         HStack(spacing: 3) { Text(service.models.first(where: { $0.id == service.currentModel })?.title ?? (service.currentModel.isEmpty ? "模型" : service.currentModel)).lineLimit(1); Image(systemName: "chevron.down") }.font(.caption)

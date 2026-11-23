@@ -38,6 +38,7 @@ export class Bridge {
     this.peers = new Map();
     this.queues = new Map();
     this.stopping = false;
+    this.probeInFlight = false;
   }
   async init() {
     this.stateFile = path.join(this.stateDir, "device.json");
@@ -88,7 +89,10 @@ export class Bridge {
         perMessageDeflate: false,
       });
       this.ws = ws;
-      ws.once("open", resolve);
+      ws.once("open", () => {
+        this.monitorConnection(ws);
+        resolve();
+      });
       ws.once("error", reject);
       ws.on("error", () => {});
       ws.on("message", (b) => {
@@ -137,6 +141,55 @@ export class Bridge {
         }
       });
     });
+  }
+  monitorConnection(ws) {
+    let awaitingPong = false;
+    ws.on("pong", () => { awaitingPong = false; });
+    const ping = setInterval(() => {
+      if (this.ws !== ws || ws.readyState !== WebSocket.OPEN) return;
+      if (awaitingPong) { ws.terminate(); return; }
+      awaitingPong = true;
+      ws.ping();
+    }, 15000);
+    // A proxy can keep an old WebSocket open after routing new connections to
+    // another relay instance. Probe the public phone route as well as the TCP link.
+    const registration = setInterval(() => this.probeRegistration(ws), 45000);
+    ping.unref();
+    registration.unref();
+    ws.once("close", () => {
+      clearInterval(ping);
+      clearInterval(registration);
+    });
+  }
+  async probeRegistration(ws) {
+    if (this.probeInFlight || this.stopping || this.ws !== ws || ws.readyState !== WebSocket.OPEN || this.peers.size >= 8) return;
+    this.probeInFlight = true;
+    try {
+      await new Promise(resolve => {
+        const probe = new WebSocket(`${this.relay}/phone/${this.device.hostId}`, {
+          handshakeTimeout: 5000,
+          perMessageDeflate: false,
+        });
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          clearTimeout(timeout);
+          resolve();
+        };
+        const timeout = setTimeout(() => { probe.terminate(); finish(); }, 7000);
+        timeout.unref();
+        probe.once("open", () => { probe.close(); finish(); });
+        probe.once("unexpected-response", (_request, response) => {
+          response.resume();
+          if (response.statusCode === 503 && this.ws === ws) ws.terminate();
+          finish();
+        });
+        probe.once("error", finish);
+      });
+    } finally {
+      this.probeInFlight = false;
+    }
   }
   raw(peerId, data) {
     if (this.ws?.readyState === WebSocket.OPEN)
@@ -244,7 +297,9 @@ if (
   const rpc = new CodexRPC(config.codexExecutable || "codex", config.codexHome);
   const ipc = new DesktopIPC(config.ipcSocket);
   await rpc.start();
-  await ipc.connect();
+  // The relay should remain reachable while Codex Desktop restarts. DesktopIPC
+  // schedules its own retries after an initial connection failure.
+  await ipc.connect().catch(() => {});
   const gateway = new Gateway({
     rpc,
     ipc,

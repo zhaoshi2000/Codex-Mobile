@@ -5,13 +5,46 @@ import os from "node:os";
 import path from "node:path";
 import { EventEmitter, once } from "node:events";
 import { randomUUID, createHash } from "node:crypto";
-import { WebSocket } from "ws";
+import http from "node:http";
+import { WebSocket, WebSocketServer } from "ws";
 import { identity, sessionKey, SecureSession } from "../src/crypto.mjs";
 import { createRelay } from "../src/relay.mjs";
 import { Bridge } from "../src/bridge.mjs";
 import { Gateway } from "../src/gateway.mjs";
 import { applyChange, messages } from "../src/timeline.mjs";
 import { DesktopCatalog } from "../src/catalog.mjs";
+
+test("bridge replaces a stale host socket when the public phone route reports 503", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ifile-stale-host-"));
+  const server = http.createServer();
+  const sockets = new WebSocketServer({ noServer: true });
+  server.on("upgrade", (request, socket, head) => {
+    if (request.url.startsWith("/host/")) sockets.handleUpgrade(request, socket, head, () => {});
+    else socket.end("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const gateway = { unwatch() {}, async close() {} };
+  const bridge = new Bridge({
+    relay: `ws://127.0.0.1:${server.address().port}`,
+    relayToken: "local-test-token-".repeat(4),
+    stateDir: dir,
+    name: "Test PC",
+    gateway,
+    allowLocal: true,
+  });
+  t.after(async () => {
+    await bridge.close();
+    for (const socket of sockets.clients) socket.terminate();
+    sockets.close();
+    await new Promise(resolve => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  await bridge.init();
+  await bridge.connect();
+  const stale = bridge.ws;
+  await bridge.probeRegistration(stale);
+  assert.notEqual(stale.readyState, WebSocket.OPEN);
+});
 
 test("authenticated encryption, ordered delivery and fresh-challenge replay protection", () => {
   const a = identity(),

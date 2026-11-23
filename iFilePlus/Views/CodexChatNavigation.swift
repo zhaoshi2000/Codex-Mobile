@@ -674,7 +674,13 @@ struct CodexChatNavigation: View {
                             if open { cache.expanded.insert(project.id); Task { await cache.load(project.id) } }
                             else { cache.expanded.remove(project.id) }
                         })) {
-                            ForEach(cache.page(project.id).rows) { thread in threadRow(thread) }
+                            ForEach(cache.page(project.id).rows) { thread in
+                                threadRow(thread).onAppear {
+                                    if thread.id == cache.page(project.id).rows.last?.id, cache.page(project.id).cursor != nil {
+                                        Task { await cache.load(project.id, more: true) }
+                                    }
+                                }
+                            }
                             if cache.loading.contains(project.id) { ProgressView() }
                             if cache.page(project.id).cursor != nil { Button("查看更多（20 条）") { Task { await cache.load(project.id, more: true) } }.disabled(cache.loading.contains(project.id)) }
                             if cache.pages[project.id]?.rows.isEmpty == true { Text("暂无对话").foregroundStyle(.secondary) }
@@ -686,10 +692,25 @@ struct CodexChatNavigation: View {
                         HStack { Label("项目", systemImage: "folder"); Spacer(); Text("\(cache.projects.count)").foregroundStyle(.secondary) }
                     }
                 }
-                Section("最近对话") {
-                    ForEach(cache.page().rows) { thread in threadRow(thread) }
+                Section {
+                    ForEach(cache.page().rows) { thread in
+                        threadRow(thread).onAppear {
+                            if thread.id == cache.page().rows.last?.id, cache.page().cursor != nil {
+                                Task { await cache.load(more: true) }
+                            }
+                        }
+                    }
                     if cache.page().cursor != nil { Button("查看更多（20 条）") { Task { await cache.load(more: true) } }.disabled(cache.loading.contains("")) }
                     if cache.loading.contains("") && cache.page().rows.isEmpty { ProgressView() }
+                } header: {
+                    HStack {
+                        Text("最近对话 · 已加载 \(cache.page().rows.count) 条")
+                        Spacer()
+                        if cache.page().cursor != nil {
+                            Button("加载更多") { Task { await cache.load(more: true) } }
+                                .disabled(cache.loading.contains(""))
+                        }
+                    }
                 }
                 if let error = cache.error { Text(error).font(.caption).foregroundStyle(.red) }
             }
