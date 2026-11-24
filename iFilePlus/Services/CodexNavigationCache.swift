@@ -1,6 +1,32 @@
 import Foundation
 import Combine
 
+struct CodexConnectionRecovery {
+    private var attempt = 0
+    private var openedConversation = false
+
+    mutating func nextRetryDelay() -> Int {
+        let delays = [1, 2, 4, 8, 15, 30]
+        let delay = delays[attempt]
+        attempt = min(attempt + 1, delays.count - 1)
+        return delay
+    }
+
+    mutating func transportReady() {
+        attempt = 0
+        resetConversation()
+    }
+
+    mutating func resetConversation() { openedConversation = false }
+
+    mutating func shouldOpenConversation(desktopState: String?, writable: Bool) -> Bool {
+        if writable { resetConversation(); return false }
+        guard !openedConversation, desktopState == nil || desktopState == "ready" else { return false }
+        openedConversation = true
+        return true
+    }
+}
+
 // A chat connection survives cancellation of the SwiftUI task waiting for it.
 @MainActor
 final class CodexChatSelection {

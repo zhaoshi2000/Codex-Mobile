@@ -662,10 +662,14 @@ private struct CodexChatContent: View {
                 pendingID = id; pendingText = text; draft = text; uncertain = true; uploadedIDs = value["attachments"] as? [String] ?? []
             }
             if let savedDraft = UserDefaults.standard.string(forKey: draftAccount), !uncertain { draft = savedDraft }
-            await service.ensureSelected(thread.id)
+            while !Task.isCancelled {
+                if scenePhase == .active { await service.ensureSelected(thread.id) }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+        .task {
             while !Task.isCancelled {
                 if scenePhase == .active {
-                    await service.ensureSelected(thread.id)
                     await service.refreshActivity()
                     if bottomDistance < 140 && !browsingOlder && !navigationOpen && !modelsOpen && !effortOpen && preview == nil { await service.markRead(thread.id) }
                 }

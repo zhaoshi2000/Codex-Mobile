@@ -2,6 +2,7 @@ import Foundation
 import CryptoKit
 import SwiftUI
 import ImageIO
+import Network
 
 struct CodexDevice: Codable, Identifiable {
     var id: String { hostId }
@@ -176,16 +177,47 @@ extension Data {
     private var showingOlder = false
     private var reconnectTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
-    private var connecting = false
+    private var connectionTask: Task<Void, Never>?
+    private var probeGeneration: UUID?
+    private var desktopRevision = 0
+    private var recovery = CodexConnectionRecovery()
+    private let networkMonitor = NWPathMonitor()
+    private var networkRoute: String?
+    private var networkAvailable = true
     private var wantsConnection = false
 
-    init(device: CodexDevice) { self.device = device }
-    deinit { historyTask?.cancel(); reconnectTask?.cancel(); heartbeatTask?.cancel(); receiveTask?.cancel(); sendTask?.cancel(); readyTimeout?.cancel(); socket?.cancel(with: .goingAway, reason: nil) }
+    init(device: CodexDevice) {
+        self.device = device
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            let available = path.status != .unsatisfied
+            let interfaces = path.availableInterfaces.filter { path.usesInterfaceType($0.type) }
+            let route = interfaces.map(\.name).sorted().joined(separator: ",")
+            Task { @MainActor [weak self] in await self?.networkChanged(available: available, route: route) }
+        }
+        networkMonitor.start(queue: DispatchQueue(label: "AstroGate.Codex.Network"))
+    }
+    deinit { networkMonitor.cancel(); historyTask?.cancel(); reconnectTask?.cancel(); heartbeatTask?.cancel(); receiveTask?.cancel(); sendTask?.cancel(); readyTimeout?.cancel(); socket?.cancel(with: .goingAway, reason: nil) }
+
     func connect() async {
-        guard !connecting else { return }
-        wantsConnection = true; connecting = true
-        defer { connecting = false }
+        wantsConnection = true
+        guard networkAvailable, !connected else { return }
+        if let connectionTask {
+            await connectionTask.value
+            if !connected { scheduleReconnect() }
+            return
+        }
         reconnectTask?.cancel(); reconnectTask = nil
+        let work = Task { [weak self] in
+            guard let self else { return }
+            await self.openConnection()
+        }
+        connectionTask = work
+        await work.value
+        connectionTask = nil
+    }
+
+    private func openConnection() async {
+        guard wantsConnection, networkAvailable else { return }
         disconnectTransport(); error = nil; status = "正在连接…"
         let attempt = generation
         do {
@@ -199,7 +231,7 @@ extension Data {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 ready = continuation
                 readyTimeout = Task { [weak self] in
-                    try? await Task.sleep(for: .seconds(20))
+                    try? await Task.sleep(for: .seconds(8))
                     guard !Task.isCancelled, let self, self.generation == current else { return }
                     self.fail("连接超时。请检查电脑连接程序和中转服务是否运行。")
                 }
@@ -216,23 +248,53 @@ extension Data {
                     } catch { if let self, self.generation == current { self.fail("连接断开：\(error.localizedDescription)。请重连；未确认的消息不要重复发送。") } }
                 }
             }
+            guard generation == attempt, connected else { return }
+            recovery.transportReady()
             startHeartbeat()
-            if let thread = selectedThread, !chatSelection.isRunning {
-                nextWritableCheck = .distantPast
-                if !showingOlder { reloadHistory(thread) }
-                await ensureSelected(thread)
-            }
-            await checkCompletions()
+            if let thread = selectedThread, !showingOlder { reloadHistory(thread) }
+            restoreSelectedChat()
+            Task { await checkCompletions() }
         } catch { if generation == attempt { fail(error.localizedDescription) } }
     }
-    func resumeConnection() async { guard wantsConnection else { return }; if !connected { await connect() } else { do { _ = try await request("ping"); await checkCompletions() } catch { fail(error.localizedDescription) } } }
+
+    private func networkChanged(available: Bool, route: String) async {
+        let changed = networkAvailable != available || (networkRoute != nil && networkRoute != route)
+        networkAvailable = available; networkRoute = route
+        guard wantsConnection, changed else { return }
+        if available { await resumeConnection() }
+        else {
+            reconnectTask?.cancel(); reconnectTask = nil
+            fail("手机网络已断开，联网后将自动恢复。")
+        }
+    }
+
+    func resumeConnection() async {
+        guard wantsConnection, networkAvailable else { return }
+        if !connected { await connect() }
+        else if await probeConnection() { restoreSelectedChat() }
+    }
+
+    private func probeConnection() async -> Bool {
+        let transport = generation
+        guard connected, probeGeneration != transport else { return false }
+        probeGeneration = transport
+        defer { if probeGeneration == transport { probeGeneration = nil } }
+        do {
+            _ = try await request("ping")
+            return generation == transport && !Task.isCancelled
+        } catch {
+            if generation == transport, !Task.isCancelled { fail("电脑连接未响应，正在自动恢复。") }
+            return false
+        }
+    }
+
     private func startHeartbeat() {
         heartbeatTask?.cancel()
         heartbeatTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(20))
+                try? await Task.sleep(for: .seconds(12))
                 guard !Task.isCancelled, let self, self.connected else { return }
-                do { _ = try await self.request("ping"); await self.checkCompletions() } catch { if !Task.isCancelled { self.fail(error.localizedDescription) }; return }
+                if await self.probeConnection() { Task { await self.checkCompletions() } }
             }
         }
     }
@@ -269,9 +331,13 @@ extension Data {
     }
     private func fail(_ text: String) {
         disconnectTransport(); status = wantsConnection ? "连接中断，正在自动重连…" : "未连接"; error = text
-        guard wantsConnection, reconnectTask == nil else { return }
+        scheduleReconnect()
+    }
+    private func scheduleReconnect() {
+        guard wantsConnection, networkAvailable, reconnectTask == nil else { return }
+        let delay = recovery.nextRetryDelay()
         reconnectTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self, self.wantsConnection else { return }
             self.reconnectTask = nil; await self.connect()
         }
@@ -365,11 +431,7 @@ extension Data {
         case "desktopStatus":
             guard let thread = selectedThread, value["threadId"] as? String == thread else { return }
             if value["desktopState"] as? String == "ready" {
-                nextWritableCheck = .distantPast
-                Task { [weak self] in
-                    guard let self, self.selectedThread == thread else { return }
-                    await self.ensureSelected(thread)
-                }
+                restoreSelectedChat()
             } else if let message = value["message"] as? String {
                 desktopDisconnected(message)
             }
@@ -377,9 +439,20 @@ extension Data {
         }
     }
     private func desktopDisconnected(_ message: String) {
+        desktopRevision += 1
+        recovery.resetConversation()
         desktopConnectionMessage = message
         writable = false; running = false; approvalNeeded = false; questions = []; notice = nil
         if let thread = selectedThread, messages.isEmpty, !showingOlder { reloadHistory(thread) }
+    }
+
+    private func restoreSelectedChat() {
+        guard let thread = selectedThread, !writable else { return }
+        nextWritableCheck = .distantPast
+        Task { [weak self] in
+            guard let self, self.selectedThread == thread else { return }
+            await self.ensureSelected(thread)
+        }
     }
 
     private func applyWatch(_ result: [String: Any]) {
@@ -394,7 +467,8 @@ extension Data {
         let result: [String: Any] = try await withCheckedThrowingContinuation { continuation in
             pending[id] = continuation
             deadlines[id] = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(method == "transcribe" ? 20 : 45))
+                let seconds = ["ping": 5, "watch": 10, "activate": 10, "transcribe": 20][method] ?? 45
+                try? await Task.sleep(for: .seconds(seconds))
                 guard !Task.isCancelled, let self, let c = self.pending.removeValue(forKey: id) else { return }
                 self.deadlines.removeValue(forKey: id)
                 let mutation = ["send", "answer", "steerQueued", "removeQueued", "stop", "setModel", "createThread", "forkThread", "deleteThread", "renameThread"].contains(method)
@@ -436,22 +510,14 @@ extension Data {
     func ensureSelected(_ threadID: String) async {
         guard !Task.isCancelled else { return }
         if selectedThread != threadID { await select(threadID); return }
-        if !writable {
-            if !connected { await connect(); return }
-            guard !chatSelection.isRunning, Date() >= nextWritableCheck else { return }
-            nextWritableCheck = Date().addingTimeInterval(5)
-            let transport = generation
-            do {
-                let result = try await request("watch", ["threadId": threadID])
-                guard selectedThread == threadID, generation == transport else { return }
-                applyWatch(result)
-                if writable {
-                    await refreshQueue(threadID)
-                    if models.isEmpty { await refreshModels(threadID) }
-                }
-            } catch { /* The manual reconnect button remains available. */ }
+        if !connected {
+            if reconnectTask == nil { await connect() }
+            return
         }
-        else if models.isEmpty { await refreshModels(threadID) }
+        guard !writable, !chatSelection.isRunning, Date() >= nextWritableCheck else { return }
+        await chatSelection.run(threadID) { [weak self] token in
+            await self?.watchSelection(threadID, activate: true, token: token)
+        }
     }
     private func loadSelection(_ threadID: String, activate: Bool, token: UUID) async {
         func current() -> Bool { chatSelection.isCurrent(token, threadID: threadID) && !Task.isCancelled }
@@ -463,6 +529,7 @@ extension Data {
         cacheCurrentChat()
         historyTask?.cancel(); historyLoadID = UUID(); loadingHistory = false; historyError = nil; historyDeferred = false
         taskFailure = nil; modelEfforts = [:]; modelDefaultEfforts = [:]
+        recovery.resetConversation()
         writable = false
         desktopConnectionMessage = nil
         running = false; notice = nil; questions = []; queuedMessages = []; progressLabel = ""; progressSteps = []; currentModel = ""; currentEffort = ""; models = []; selectedThread = threadID; showingOlder = false; olderCursor = nil; turnID = nil; approvalNeeded = false; error = nil
@@ -475,36 +542,48 @@ extension Data {
         selectionStartRevision = timelineRevision
         if !connected { await connect() }
         guard current(), connected else { return }
-        let transport = generation
         // The persisted transcript can load even if the live desktop owner is unavailable.
         reloadHistory(threadID)
+        await watchSelection(threadID, activate: activate, token: token)
+    }
+
+    private func watchSelection(_ threadID: String, activate: Bool, token: UUID) async {
+        let transport = generation
+        let desktop = desktopRevision
+        func current() -> Bool {
+            chatSelection.isCurrent(token, threadID: threadID) &&
+                generation == transport && desktopRevision == desktop && !Task.isCancelled
+        }
+        nextWritableCheck = Date().addingTimeInterval(4)
         do {
             var result = try await request("watch", ["threadId": threadID])
-            guard current(), generation == transport else { return }
+            guard current() else { return }
             applyWatch(result)
             selecting = false
-            if activate && !writable && (result["desktopState"] as? String ?? "ready") == "ready" {
+            if activate && recovery.shouldOpenConversation(desktopState: result["desktopState"] as? String, writable: writable) {
                 // Opening Desktop can take seconds. Keep history and the live
                 // timeline visible while waiting for the owner to become ready.
                 desktopConnectionMessage = "正在打开电脑原对话…"
                 _ = try await request("activate", ["threadId": threadID])
-                for _ in 0..<8 {
+                guard current() else { return }
+                for _ in 0..<3 {
                     try await Task.sleep(for: .seconds(1))
-                    guard current(), generation == transport else { return }
+                    guard current() else { return }
                     result = try await request("watch", ["threadId": threadID])
-                    guard current(), generation == transport else { return }
+                    guard current() else { return }
                     if result["writable"] as? Bool == true || (result["desktopState"] as? String ?? "ready") != "ready" { break }
                 }
-                guard current(), generation == transport else { return }
                 applyWatch(result)
             }
-            if writable { await refreshModels(threadID) }
-            guard current(), generation == transport else { return }
-            await refreshQueue(threadID)
+            if writable {
+                recovery.resetConversation()
+                Task { await refreshModels(threadID) }
+                Task { await refreshQueue(threadID) }
+            }
         } catch is CancellationError {
             // Leaving or replacing a chat is not a connection failure.
         } catch {
-            guard current(), generation == transport else { return }
+            guard current() else { return }
             self.error = "对话连接暂未就绪：" + error.localizedDescription + "。可点“重新连接对话”重试。"
         }
     }

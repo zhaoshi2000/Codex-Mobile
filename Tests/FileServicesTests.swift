@@ -2,6 +2,23 @@ import XCTest
 @testable import FileServices
 
 final class FileServicesTests: XCTestCase {
+    func testDesktopRecoveryOpensOriginalOnceAfterDesktopReturns() {
+        var recovery = CodexConnectionRecovery()
+        XCTAssertFalse(recovery.shouldOpenConversation(desktopState: "unavailable", writable: false))
+        XCTAssertFalse(recovery.shouldOpenConversation(desktopState: "reconnecting", writable: false))
+        XCTAssertTrue(recovery.shouldOpenConversation(desktopState: "ready", writable: false))
+        XCTAssertFalse(recovery.shouldOpenConversation(desktopState: "ready", writable: false))
+        XCTAssertFalse(recovery.shouldOpenConversation(desktopState: "ready", writable: true))
+        XCTAssertTrue(recovery.shouldOpenConversation(desktopState: "ready", writable: false))
+    }
+
+    func testTransportRecoveryRetriesQuicklyThenCapsDelayAndResets() {
+        var recovery = CodexConnectionRecovery()
+        XCTAssertEqual((0..<8).map { _ in recovery.nextRetryDelay() }, [1, 2, 4, 8, 15, 30, 30, 30])
+        recovery.transportReady()
+        XCTAssertEqual(recovery.nextRetryDelay(), 1)
+    }
+
     func testRecentChatsRestoreConfirmedMessagesWithBoundedPerDeviceMemory() {
         var cache = CodexRecentChatCache(), otherDevice = CodexRecentChatCache()
         let confirmed = CodexChatMessage(["id": "reply", "role": "assistant", "text": "hello"])!
