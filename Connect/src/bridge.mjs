@@ -297,9 +297,6 @@ if (
   const rpc = new CodexRPC(config.codexExecutable || "codex", config.codexHome);
   const ipc = new DesktopIPC(config.ipcSocket);
   await rpc.start();
-  // The relay should remain reachable while Codex Desktop restarts. DesktopIPC
-  // schedules its own retries after an initial connection failure.
-  await ipc.connect().catch(() => {});
   const gateway = new Gateway({
     rpc,
     ipc,
@@ -310,6 +307,8 @@ if (
   });
   gateway.transcribe = speechClient({ relay: config.relay, token: process.env.IFILE_RELAY_TOKEN });
   await gateway.init();
+  // Serve persisted history while the Desktop channel establishes itself.
+  void ipc.connect().catch(() => {});
   const bridge = new Bridge({
     relay: config.relay,
     relayToken: process.env.IFILE_RELAY_TOKEN,

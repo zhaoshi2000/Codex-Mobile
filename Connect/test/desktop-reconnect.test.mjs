@@ -63,6 +63,22 @@ test('desktop handshake timeout closes half-open socket and retries automaticall
   assert.equal(sockets[0].destroyed, true);
 });
 
+test('offline follows are restored and only sustained silence drops the channel', async t => {
+  const { ipc, sockets, requests } = await fixture(t, m => m.method === 'thread-owner-discovery');
+  ipc.follow('thread-history');
+  ipc.follow('thread-left');
+  ipc.follow('thread-left', false);
+  await ipc.connect();
+  await assert.rejects(ipc.owner('thread-history'), /状态查询超时/);
+  assert.equal(ipc.connected, true);
+  assert.equal(sockets.length, 1);
+  const follows = requests.filter(m => m.method === 'thread-stream-following-changed');
+  assert.deepEqual(follows.map(m => m.params.conversationId), ['thread-history']);
+  ipc.firstReadTimeoutAt = Date.now() - 13000;
+  await assert.rejects(ipc.owner('thread-history'), /状态查询超时/);
+  await until(() => sockets.length === 2 && ipc.connected);
+});
+
 test('uncertain mutation is rejected and never replayed when the desktop recovers', async t => {
   const { ipc, sockets, requests } = await fixture(t, m => m.method === 'thread-follower-start-turn');
   await Promise.all([ipc.connect(), ipc.connect()]);

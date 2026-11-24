@@ -130,6 +130,7 @@ extension Data {
     @Published var progressSteps: [CodexProgressStep] = []
     @Published var approvalNeeded = false
     @Published var writable = false
+    @Published private(set) var desktopConnectionMessage: String?
     @Published var downloadState: CodexDownloadState?
     private var downloadTask: Task<URL, Error>?
     @Published var downloadProgress: Double?
@@ -215,8 +216,13 @@ extension Data {
                     } catch { if let self, self.generation == current { self.fail("连接断开：\(error.localizedDescription)。请重连；未确认的消息不要重复发送。") } }
                 }
             }
-            if let thread = selectedThread, !chatSelection.isRunning { await select(thread, activate: false) }
-            await checkCompletions(); startHeartbeat()
+            startHeartbeat()
+            if let thread = selectedThread, !chatSelection.isRunning {
+                nextWritableCheck = .distantPast
+                if !showingOlder { reloadHistory(thread) }
+                await ensureSelected(thread)
+            }
+            await checkCompletions()
         } catch { if generation == attempt { fail(error.localizedDescription) } }
     }
     func resumeConnection() async { guard wantsConnection else { return }; if !connected { await connect() } else { do { _ = try await request("ping"); await checkCompletions() } catch { fail(error.localizedDescription) } } }
@@ -254,6 +260,8 @@ extension Data {
         heartbeatTask?.cancel(); heartbeatTask = nil
         generation = UUID(); receiveTask?.cancel(); sendTask?.cancel(); socket?.cancel(with: .goingAway, reason: nil); socket = nil
         key = nil; activeTasks = []; connected = false; writable = false; running = false; readyTimeout?.cancel()
+        desktopConnectionMessage = nil
+        historyTask?.cancel(); historyLoadID = UUID(); loadingHistory = false
         let e = CodexConnectError(message: "连接已关闭")
         ready?.resume(throwing: e); ready = nil
         for c in pending.values { c.resume(throwing: e) }; pending.removeAll()
@@ -351,11 +359,35 @@ extension Data {
         case "completed":
             if let id = value["id"] as? String { completion(id, threadID: value["threadId"] as? String, outcome: value["outcome"] as? [String: Any]) }
         case "notice":
-            error = value["message"] as? String
-            if error?.hasPrefix("电脑通道重连中") == true { writable = false; notice = nil }
+            if let message = value["message"] as? String, message.hasPrefix("电脑通道重连中") {
+                desktopDisconnected(message)
+            } else { error = value["message"] as? String }
+        case "desktopStatus":
+            guard let thread = selectedThread, value["threadId"] as? String == thread else { return }
+            if value["desktopState"] as? String == "ready" {
+                nextWritableCheck = .distantPast
+                Task { [weak self] in
+                    guard let self, self.selectedThread == thread else { return }
+                    await self.ensureSelected(thread)
+                }
+            } else if let message = value["message"] as? String {
+                desktopDisconnected(message)
+            }
         default: break
         }
     }
+    private func desktopDisconnected(_ message: String) {
+        desktopConnectionMessage = message
+        writable = false; running = false; approvalNeeded = false; questions = []; notice = nil
+        if let thread = selectedThread, messages.isEmpty, !showingOlder { reloadHistory(thread) }
+    }
+
+    private func applyWatch(_ result: [String: Any]) {
+        writable = result["writable"] as? Bool == true
+        desktopConnectionMessage = writable ? nil : result["message"] as? String
+        if writable, error?.hasPrefix("对话连接暂未就绪") == true { error = nil }
+    }
+
     func request(_ method: String, _ params: [String: Any] = [:]) async throws -> [String: Any] {
         guard connected else { throw CodexConnectError(message: "电脑未连接，请返回项目页重连") }
         let id = UUID().uuidString
@@ -407,14 +439,16 @@ extension Data {
         if !writable {
             if !connected { await connect(); return }
             guard !chatSelection.isRunning, Date() >= nextWritableCheck else { return }
-            nextWritableCheck = Date().addingTimeInterval(15)
+            nextWritableCheck = Date().addingTimeInterval(5)
             let transport = generation
             do {
                 let result = try await request("watch", ["threadId": threadID])
                 guard selectedThread == threadID, generation == transport else { return }
-                writable = result["writable"] as? Bool ?? false
-                status = result["message"] as? String ?? status
-                if writable { error = nil; await refreshModels(threadID) }
+                applyWatch(result)
+                if writable {
+                    await refreshQueue(threadID)
+                    if models.isEmpty { await refreshModels(threadID) }
+                }
             } catch { /* The manual reconnect button remains available. */ }
         }
         else if models.isEmpty { await refreshModels(threadID) }
@@ -425,12 +459,16 @@ extension Data {
         selecting = true
         defer { if chatSelection.isCurrent(token, threadID: threadID) { selecting = false } }
         let retainVisibleMessages = selectedThread == threadID && !showingOlder
+        let retainedCursor = retainVisibleMessages ? olderCursor : nil
         cacheCurrentChat()
         historyTask?.cancel(); historyLoadID = UUID(); loadingHistory = false; historyError = nil; historyDeferred = false
         taskFailure = nil; modelEfforts = [:]; modelDefaultEfforts = [:]
         writable = false
+        desktopConnectionMessage = nil
         running = false; notice = nil; questions = []; queuedMessages = []; progressLabel = ""; progressSteps = []; currentModel = ""; currentEffort = ""; models = []; selectedThread = threadID; showingOlder = false; olderCursor = nil; turnID = nil; approvalNeeded = false; error = nil
-        if !retainVisibleMessages {
+        if retainVisibleMessages {
+            olderCursor = retainedCursor
+        } else {
             let cached = chatCache.get(threadID)
             messages = cached?.messages ?? []; olderCursor = cached?.cursor
         }
@@ -438,29 +476,29 @@ extension Data {
         if !connected { await connect() }
         guard current(), connected else { return }
         let transport = generation
+        // The persisted transcript can load even if the live desktop owner is unavailable.
+        reloadHistory(threadID)
         do {
             var result = try await request("watch", ["threadId": threadID])
             guard current(), generation == transport else { return }
-            writable = result["writable"] as? Bool ?? false; status = result["message"] as? String ?? "已连接"
+            applyWatch(result)
             selecting = false
-            reloadHistory(threadID)
-            if activate && !writable {
+            if activate && !writable && (result["desktopState"] as? String ?? "ready") == "ready" {
                 // Opening Desktop can take seconds. Keep history and the live
                 // timeline visible while waiting for the owner to become ready.
-                status = "正在打开电脑原对话…"
+                desktopConnectionMessage = "正在打开电脑原对话…"
                 _ = try await request("activate", ["threadId": threadID])
                 for _ in 0..<8 {
                     try await Task.sleep(for: .seconds(1))
                     guard current(), generation == transport else { return }
                     result = try await request("watch", ["threadId": threadID])
                     guard current(), generation == transport else { return }
-                    if result["writable"] as? Bool == true { break }
+                    if result["writable"] as? Bool == true || (result["desktopState"] as? String ?? "ready") != "ready" { break }
                 }
                 guard current(), generation == transport else { return }
-                writable = result["writable"] as? Bool ?? false
-                status = result["message"] as? String ?? "已连接"
+                applyWatch(result)
             }
-            if writable { error = nil; await refreshModels(threadID) }
+            if writable { await refreshModels(threadID) }
             guard current(), generation == transport else { return }
             await refreshQueue(threadID)
         } catch is CancellationError {
@@ -502,7 +540,10 @@ extension Data {
                 if !self.running, self.timelineRevision == revision { self.applyOutcome(page["outcome"] as? [String: Any]) }
                 self.cacheCurrentChat()
             } catch {
-                if current() { self.historyError = "较早记录暂未加载，可重试。"; self.historyDeferred = true }
+                if current() {
+                    self.historyError = self.messages.isEmpty ? "聊天记录暂未加载。" : "较早记录暂未加载。"
+                    self.historyDeferred = true
+                }
             }
         }
     }

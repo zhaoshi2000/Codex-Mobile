@@ -508,6 +508,9 @@ private struct CodexChatContent: View {
                     }.disabled(!service.writable)
                 }
                 if service.approvalNeeded { Label("有操作等待确认，请在电脑处理后继续。", systemImage: "hand.raised").font(.footnote).foregroundStyle(.orange) }
+                if let message = service.desktopConnectionMessage, !service.writable {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                }
                 if let error = service.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
                 if let failure = service.taskFailure { Text(failure).font(.caption).foregroundStyle(.red).lineLimit(4).textSelection(.enabled) }
                 if !service.writable {

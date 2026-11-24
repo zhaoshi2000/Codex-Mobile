@@ -34,6 +34,8 @@ export class DesktopIPC extends EventEmitter {
     this.retryMs = retryMs;
     this.timeoutMs = timeoutMs;
     this.lastError = null;
+    this.errorCode = null;
+    this.firstReadTimeoutAt = null;
   }
   connect() {
     if (this.stopping) return Promise.reject(new Error("桌面通道已关闭"));
@@ -50,11 +52,19 @@ export class DesktopIPC extends EventEmitter {
     const socket = net.createConnection(this.path);
     this.socket = socket;
     socket.on("error", error => {
-      if (this.socket === socket) this.lastError = "Codex 桌面通道错误：" + (error.code || "连接中断");
+      if (this.socket === socket) {
+        this.errorCode = error.code || null;
+        this.lastError = "Codex 桌面通道错误：" + (error.code || "连接中断");
+      }
     });
-    socket.on("data", b => { if (this.socket === socket) this.read(b); });
+    socket.on("data", b => {
+      if (this.socket !== socket) return;
+      this.firstReadTimeoutAt = null;
+      this.read(b);
+    });
     socket.on("close", () => {
       if (this.socket !== socket) return;
+      const wasConnected = this.connected;
       this.connected = false;
       if (!this.stopping && !this.lastError) this.lastError = "Codex 桌面通道已断开，正在重新连接";
       for (const p of this.pending.values()) {
@@ -64,7 +74,7 @@ export class DesktopIPC extends EventEmitter {
       this.pending.clear();
       this.buffer = Buffer.alloc(0);
       this.bufferLength = 0;
-      this.emit("closed");
+      if (wasConnected) this.emit("closed");
       if (!this.stopping) {
         clearTimeout(this.retry);
         this.retry = setTimeout(() => this.connect().catch(() => {}), this.retryMs);
@@ -93,17 +103,18 @@ export class DesktopIPC extends EventEmitter {
       this.clientId = r.result.clientId;
       this.connected = true;
       this.lastError = null;
+      this.errorCode = null;
       for (const id of this.followed) this.follow(id);
       this.emit("connected");
     } catch (error) {
       this.lastError = error.message;
+      this.errorCode = error.code || null;
       socket.destroy();
       throw error;
     }
   }
   reconnect(reason) {
     this.lastError = reason;
-    this.connected = false;
     // A transport failure is recoverable. Only close() disables reconnection.
     this.socket?.destroy();
   }
@@ -167,14 +178,31 @@ export class DesktopIPC extends EventEmitter {
     this.socket.write(Buffer.concat([h, b]));
   }
   request(method, params, version = 1, targetClientId) {
+    if (method !== "initialize" && !this.connected) {
+      return Promise.reject(new Error("电脑 Codex 通道未就绪"));
+    }
     return new Promise((resolve, reject) => {
       const requestId = randomUUID();
+      const readOnly = method === "thread-owner-discovery" || method === "thread-follower-read-model-settings";
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
+        if (readOnly) {
+          const now = Date.now();
+          this.firstReadTimeoutAt ??= now;
+          // A single slow lookup does not imply a broken pipe. Retry the pipe
+          // only after repeated timeouts without any inbound traffic.
+          if (now - this.firstReadTimeoutAt >= 12000) {
+            this.reconnect("电脑 Codex 长时间未响应，正在重新连接");
+          }
+          const error = new Error("电脑 Codex 状态查询超时");
+          error.code = "DESKTOP_READ_TIMEOUT";
+          reject(error);
+          return;
+        }
         reject(new Error("桌面未确认操作，发送结果待核实"));
         // Never replay an uncertain send. Reconnect and resubscribe only.
         this.reconnect("Codex 桌面响应超时，正在重新连接；未确认的消息请勿重复发送");
-      }, this.timeoutMs);
+      }, readOnly ? Math.min(4000, this.timeoutMs) : this.timeoutMs);
       this.pending.set(requestId, { resolve, reject, timer });
       try {
         this.write({
@@ -205,6 +233,7 @@ export class DesktopIPC extends EventEmitter {
   }
   follow(threadId, following = true) {
     following ? this.followed.add(threadId) : this.followed.delete(threadId);
+    if (!this.connected || this.socket?.destroyed) return;
     this.write({
       type: "broadcast",
       sourceClientId: this.clientId,
@@ -288,13 +317,13 @@ export class DesktopIPC extends EventEmitter {
   }
   close() {
     this.stopping = true;
-    this.connected = false;
     clearTimeout(this.retry);
     for (const id of this.followed) {
       try {
         this.follow(id, false);
       } catch {}
     }
+    this.connected = false;
     this.socket?.destroy();
   }
 }

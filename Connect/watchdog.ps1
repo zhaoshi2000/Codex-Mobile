@@ -9,9 +9,9 @@ try {
     while ($true) {
         try {
             $settings = Get-Content -LiteralPath $Config -Raw -Encoding UTF8 | ConvertFrom-Json
-            $cli = Find-CodexExecutable -Preferred $settings.codexExecutable
-            if (!(Test-Path -LiteralPath '\\.\pipe\codex-ipc')) {
-                if (Start-CodexDesktop -CodexCli $cli -Hidden) { Start-Sleep -Seconds 10 }
+            if (!(Test-Path -LiteralPath '\\.\pipe\codex-ipc') -and !(Test-CodexDesktopRunning -CodexCli $settings.codexExecutable)) {
+                $cli = Find-CodexExecutable -Preferred $settings.codexExecutable
+                Start-CodexDesktop -CodexCli $cli -Hidden | Out-Null
             }
             & (Join-Path $PSScriptRoot 'start.ps1') -Config $Config -NoShowQR -EnsureRunning | Out-Null
         } catch {

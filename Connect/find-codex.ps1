@@ -54,6 +54,18 @@ function Find-CodexExecutable {
     return $null
 }
 
+function Test-CodexDesktopRunning {
+    param([string]$CodexCli)
+    $standalone = if ($CodexCli -and $CodexCli -match '\\resources\\codex\.exe$') {
+        Join-Path (Split-Path (Split-Path $CodexCli -Parent) -Parent) 'Codex.exe'
+    }
+    foreach ($process in @(Get-Process -Name 'Codex','ChatGPT' -ErrorAction SilentlyContinue)) {
+        if ($process.Path -match '[\\/]OpenAI\.Codex_[^\\/]+[\\/]app[\\/](ChatGPT|Codex)\.exe$' -or
+            ($standalone -and $process.Path -eq $standalone)) { return $true }
+    }
+    return $false
+}
+
 function Start-CodexDesktop {
     param([string]$CodexCli, [switch]$Hidden)
     if (Get-Command Get-AppxPackage -ErrorAction SilentlyContinue) {

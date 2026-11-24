@@ -18,20 +18,6 @@ function Select-CodexExecutable {
     } finally { $picker.Dispose() }
 }
 
-function Wait-CodexDesktop {
-    param([string]$Cli)
-    $pipe = '\\.\pipe\codex-ipc'
-    if (Test-Path -LiteralPath $pipe) { return }
-    if (!(Start-CodexDesktop -CodexCli $Cli)) {
-        throw '找不到 Codex 桌面版。请先打开并登录 Codex，然后重新打开连接程序。'
-    }
-    for ($n = 0; $n -lt 60; $n++) {
-        if (Test-Path -LiteralPath $pipe) { return }
-        Start-Sleep -Milliseconds 500
-    }
-    throw 'Codex 桌面版尚未就绪。请在打开的 Codex 窗口完成登录，然后重试。'
-}
-
 $statePath = Join-Path $env:USERPROFILE '.ifileplus-connect'
 $configPath = Join-Path $statePath 'bridge.config.json'
 $mutex = New-Object Threading.Mutex($false, 'Local\AstroGateConnectLauncher')
@@ -57,7 +43,9 @@ try {
     $configPath = Initialize-ConnectConfiguration -InstallRoot $PSScriptRoot -StatePath $statePath -CodexExecutable $cli -Reconfigure:$Configure
     Repair-CodexExecutable -ConfigPath $configPath
     $settings = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    Wait-CodexDesktop -Cli $settings.codexExecutable
+    if (!(Test-Path -LiteralPath '\\.\pipe\codex-ipc') -and !(Test-CodexDesktopRunning -CodexCli $settings.codexExecutable)) {
+        Start-CodexDesktop -CodexCli $settings.codexExecutable -Hidden | Out-Null
+    }
     & (Join-Path $PSScriptRoot 'start.ps1') -Config $configPath
     & (Join-Path $PSScriptRoot 'install-autostart.ps1') -Config $configPath | Out-Null
 } catch {

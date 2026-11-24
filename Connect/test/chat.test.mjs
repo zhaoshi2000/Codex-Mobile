@@ -1,6 +1,42 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {EventEmitter} from 'node:events';import {randomUUID} from 'node:crypto';import {Gateway} from '../src/gateway.mjs';import {DesktopIPC} from '../src/desktop.mjs';import {DesktopCatalog} from '../src/catalog.mjs';
 async function fixture(t, options={}){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'astro-chat-test-'));const ipc=new EventEmitter();ipc.connected=true;ipc.owner=async()=> 'owner';ipc.follow=()=>{};const rpc={call:async()=>({thread:{cwd:dir}})};const g=new Gateway({rpc,ipc,stateDir:dir,roots:[dir],...options});await g.init();t.after(async()=>{await g.close();await fs.rm(dir,{recursive:true,force:true});});return{g,ipc,rpc,dir,peer:{id:'phone',publicKey:'key'},id:'thread-test-123456'};}
 
+test('watch works while the desktop is unavailable and the phone sees recovery', async t => {
+  const { g, ipc, rpc, peer, id, dir } = await fixture(t);
+  const events = [];
+  peer.emit = event => events.push(event);
+  rpc.call = async (method, params) => {
+    if (method === 'thread/read') return { thread: { cwd: dir } };
+    assert.equal(method, 'thread/turns/list');
+    assert.equal(params.itemsView, 'summary');
+    return params.cursor
+      ? { data: [{ id: 'turn-0', items: [{ id: 'history-0', type: 'agentMessage', text: 'Earlier reply' }] }] }
+      : { data: [{ id: 'turn-1', items: [{ id: 'history-1', type: 'agentMessage', text: 'Saved reply' }] }], nextCursor: 'prior-turns' };
+  };
+  let ownerLookups = 0;
+  ipc.owner = async () => { ownerLookups++; return 'owner'; };
+  ipc.connected = false;
+  ipc.errorCode = 'ENOENT';
+  const watch = await g.handle('watch', { threadId: id }, peer);
+  assert.equal(watch.desktopState, 'unavailable');
+  assert.equal(watch.writable, false);
+  assert.equal(ownerLookups, 0);
+  const history = await g.handle('history', { threadId: id }, peer);
+  assert.equal(history.messages[0].text, 'Saved reply');
+
+  ipc.connected = true;
+  ipc.errorCode = null;
+  ipc.emit('connected');
+  assert.deepEqual(events.at(-1), { event: 'desktopStatus', threadId: id, desktopState: 'ready' });
+  assert.equal((await g.handle('watch', { threadId: id }, peer)).writable, true);
+  const older = await g.handle('history', { threadId: id, cursor: history.nextCursor }, peer);
+  assert.equal(older.messages[0].text, 'Earlier reply');
+  assert.equal(older.nextCursor, null);
+  ipc.connected = false;
+  ipc.emit('closed');
+  assert.equal(events.at(-1).desktopState, 'reconnecting');
+});
+
 test('active messages queue natively; only explicit steering removes and sends once', async t => {
   const {g,ipc,peer,id}=await fixture(t); let queues=0,steers=0,starts=0,removes=0;
   ipc.queue=async()=>{queues++}; ipc.steer=async()=>{steers++}; ipc.send=async()=>{starts++}; ipc.removeQueued=async()=>{removes++;return {id:'removed'}};

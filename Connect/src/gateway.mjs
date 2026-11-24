@@ -15,6 +15,8 @@ import { messages, applyChange, desktopTurns, progress, turnOutcome } from "./ti
 import { Uploads } from "./uploads.mjs";
 import { DesktopActivity } from "./activity.mjs";
 import { DesktopCatalog } from "./catalog.mjs";
+
+const summaryCursorPrefix = "summary:";
 export class Gateway {
   constructor({
     rpc,
@@ -71,13 +73,37 @@ export class Gateway {
     this.completedThreads = this.navigation.completed;
     this.completedThreadProjects = this.navigation.projects ||= {};
     this.ipc.on("broadcast", (m) => this.onBroadcast(m));
-    this.ipc.on("closed", () => { this.states.clear(); this.queued.clear(); this.historyRefreshNeeded.clear(); for (const s of this.subscribers.values()) s.peer.emit?.({ event: "notice", message: "电脑通道重连中，请等待状态恢复" }); });
+    this.ipc.on("closed", () => {
+      this.states.clear();
+      this.queued.clear();
+      this.historyRefreshNeeded.clear();
+      for (const timer of this.timers.values()) clearTimeout(timer);
+      this.timers.clear();
+      const status = this.desktopStatus();
+      for (const { threadId, peer } of this.subscribers.values()) {
+        // Older phones still need a notice to disable sending.
+        peer.emit?.({ event: "notice", message: "电脑通道重连中，请等待状态恢复" });
+        peer.emit?.({ event: "desktopStatus", threadId, ...status });
+      }
+    });
+    this.ipc.on("connected", () => {
+      for (const { threadId, peer } of this.subscribers.values()) {
+        peer.emit?.({ event: "desktopStatus", threadId, desktopState: "ready" });
+      }
+    });
     for (const id of this.pendingQueued.keys()) this.ipc.follow(id);
     this.leaseTimer = setInterval(
       () => this.cleanLeases().catch(() => {}),
       60000,
     );
     this.leaseTimer.unref();
+  }
+  desktopStatus() {
+    if (this.ipc.connected !== false) return { desktopState: "ready" };
+    if (this.ipc.errorCode === "ENOENT") {
+      return { desktopState: "unavailable", message: "电脑 Codex 的通信入口未就绪。可先查看历史，发送将在连接恢复后可用。" };
+    }
+    return { desktopState: "reconnecting", message: "正在恢复电脑 Codex 连接。可先查看历史。" };
   }
   async authorizeThread(id) {
     if (typeof id !== "string" || !/^[a-zA-Z0-9_-]{10,100}$/.test(id))
@@ -117,7 +143,7 @@ export class Gateway {
     const cached = this.historyCache.get(key);
     if (cached && cached.desktopConnected === this.ipc.connected && Date.now() - cached.at < 2000) return cached.page;
     if (this.historyReads.has(key)) return this.historyReads.get(key);
-    const work = this.readHistory(threadId, cursor).then(page => {
+    const work = this.readHistoryPage(threadId, cursor).then(page => {
       this.historyCache.set(key, {at: Date.now(), desktopConnected: this.ipc.connected, page});
       while (this.historyCache.size > 8) this.historyCache.delete(this.historyCache.keys().next().value);
       return page;
@@ -125,6 +151,36 @@ export class Gateway {
     this.historyReads.set(key, work);
     return work;
   }
+  async readHistoryPage(threadId, cursor) {
+    if (typeof cursor === "string" && cursor.startsWith(summaryCursorPrefix)) {
+      return this.readHistorySummary(threadId, cursor.slice(summaryCursorPrefix.length));
+    }
+    if (!cursor && this.ipc.connected === false) {
+      try { return await this.readHistorySummary(threadId); }
+      catch { /* Older app servers can still provide the item history. */ }
+    }
+    return this.readHistory(threadId, cursor);
+  }
+
+  async readHistorySummary(threadId, cursor) {
+    // While the live stream is unavailable, load visible turns in one disk scan.
+    // The summary retains messages and excludes large internal tool outputs.
+    for (let limit = 16; ; limit = Math.max(1, Math.floor(limit / 2))) {
+      const page = await this.rpc.call("thread/turns/list", {
+        threadId, limit, sortDirection: "desc", itemsView: "summary",
+        ...(cursor ? { cursor } : {}),
+      }, 15000);
+      const turns = page.data.slice().reverse();
+      const rows = messages(turns, Infinity, false, Infinity);
+      const fits = Buffer.byteLength(JSON.stringify(rows)) <= 230000;
+      if (limit > 1 && !fits) continue;
+      return {
+        messages: fits ? rows : messages(turns),
+        nextCursor: page.nextCursor ? summaryCursorPrefix + page.nextCursor : null,
+      };
+    }
+  }
+
   async readHistory(threadId, cursor) {
     const deadline = Date.now() + this.historyBudgetMs;
     let limit = cursor ? 50 : 15, result = [], next = cursor || null, pagesRead = 0;
@@ -174,7 +230,7 @@ export class Gateway {
       const metadataDeadline = Date.now() + 3000;
       for (let page = 0; page < 3; page++) {
         if (Date.now() >= metadataDeadline) break;
-        const r = await this.rpc.call("thread/turns/list", {threadId, limit: 100, sortDirection: "desc", ...(turnCursor ? {cursor: turnCursor} : {})}, Math.max(1, metadataDeadline - Date.now()));
+        const r = await this.rpc.call("thread/turns/list", {threadId, limit: 100, sortDirection: "desc", itemsView: "notLoaded", ...(turnCursor ? {cursor: turnCursor} : {})}, Math.max(1, metadataDeadline - Date.now()));
         metadata.push(...(r.data || []));
         if (!oldest || metadata.some(t => (t.id || t.turnId) === oldest) || !r.nextCursor || r.nextCursor === turnCursor) break;
         turnCursor = r.nextCursor;
@@ -437,16 +493,27 @@ export class Gateway {
       }
       case "watch": {
         await this.authorizeThread(p.threadId);
-        this.unwatch(peer.id);
-        this.subscribers.set(peer.id, { threadId: p.threadId, peer });
+        if (this.subscribers.get(peer.id)?.threadId !== p.threadId) {
+          this.unwatch(peer.id);
+          this.subscribers.set(peer.id, { threadId: p.threadId, peer });
+        }
         this.ipc.follow(p.threadId);
+        const status = this.desktopStatus();
+        if (status.desktopState !== "ready") return { writable: false, ...status };
         let writable = false;
         try {
           await this.ipc.owner(p.threadId);
           writable = true;
-        } catch {}
+        } catch (error) {
+          if (error.code === "DESKTOP_READ_TIMEOUT") {
+            return { writable: false, desktopState: "reconnecting", message: "电脑 Codex 状态查询超时，正在重试。可先查看历史。" };
+          }
+        }
+        const current = this.desktopStatus();
+        if (current.desktopState !== "ready") return { writable: false, ...current };
         return {
           writable,
+          ...current,
           message: writable
             ? "已连接桌面原会话"
             : "请在电脑打开此对话，或点击“在电脑打开”",
